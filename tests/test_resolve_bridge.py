@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -18,6 +19,17 @@ from pathlib import Path
 from src.utils import resolve_bridge as rb
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+def _home_env() -> dict:
+    """The variables `Path.home()` reads, for tests that clear `os.environ`.
+
+    POSIX falls back to the password database when HOME is unset; Windows has
+    no fallback, so with USERPROFILE gone `Path.home()` and `expanduser()`
+    raise "Could not determine home directory".
+    """
+    names = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def signed(token: str, *, timestamp: int, nonce: str, operation: str = "health", request_id: str = "1"):
@@ -698,7 +710,7 @@ class InstallerTargetTests(unittest.TestCase):
 
         with mock.patch.dict(
             os.environ,
-            {self.installer.ENV_CONFIG_PATH: "~/private/resolve-bridge.json"},
+            {self.installer.ENV_CONFIG_PATH: "~/private/resolve-bridge.json", **_home_env()},
             clear=True,
         ):
             self.assertEqual(
@@ -741,7 +753,7 @@ class InstallerTargetTests(unittest.TestCase):
         config = pathlib.Path(tempfile.mkdtemp(prefix="bridge_invalid_config_")) / "bridge.json"
         config.write_text("{not valid json", encoding="utf-8")
         with mock.patch.dict(
-            os.environ, {self.installer.ENV_CONFIG_PATH: str(config)}, clear=True
+            os.environ, {self.installer.ENV_CONFIG_PATH: str(config), **_home_env()}, clear=True
         ):
             result = self.installer.ensure_config(port=50125, rotate=False)
 
@@ -759,7 +771,7 @@ class InstallerTargetTests(unittest.TestCase):
         root = pathlib.Path(tempfile.mkdtemp(prefix="bridge_custom_config_"))
         config = root / "private config" / "bridge.json"
         target = root / "Fusion/Scripts/Utility"
-        env = {self.installer.ENV_CONFIG_PATH: str(config)}
+        env = {self.installer.ENV_CONFIG_PATH: str(config), **_home_env()}
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(self.installer, "script_targets", return_value=[target]), \
                 mock.patch.object(self.installer, "python_preflight", return_value={"ok": True}), \
@@ -822,7 +834,8 @@ class InstallerTargetTests(unittest.TestCase):
         home = pathlib.Path(tempfile.mkdtemp(prefix="fake_home_"))
         container = home / "Library/Containers/com.blackmagic-design.DaVinciResolveLite"
         (container / "Data").mkdir(parents=True)  # container only; NO Fusion tree
-        with mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
             targets = self.installer.script_targets()
         expected = container / "Data" / self.installer._SCRIPTS_SUFFIX
         self.assertIn(expected, targets, f"container skipped because its tree is absent: {targets}")
@@ -841,7 +854,8 @@ class InstallerTargetTests(unittest.TestCase):
         home = pathlib.Path(tempfile.mkdtemp(prefix="fake_home_"))
         container = home / "Library/Containers/com.blackmagic-design.DaVinciResolveLite"
         (container / "Data").mkdir(parents=True)
-        with mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
             targets = self.installer.script_targets()
 
         documented = container / "Data" / self.installer._SCRIPTS_SUFFIX
@@ -863,7 +877,8 @@ class InstallerTargetTests(unittest.TestCase):
 
         home = pathlib.Path(tempfile.mkdtemp(prefix="fake_home_"))
         (home / self.installer._SANDBOX_FALLBACK_SUFFIX).mkdir(parents=True)
-        with mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
             targets = self.installer.script_targets()
         self.assertNotIn(
             home / self.installer._SANDBOX_FALLBACK_SUFFIX, targets,
@@ -928,7 +943,8 @@ class InstallerTargetTests(unittest.TestCase):
         home = pathlib.Path(tempfile.mkdtemp(prefix="fake_home_"))
         for name in ("com.blackmagic-design.BlackmagicRawPlayer", "com.blackmagic-design.IOXPC"):
             (home / "Library/Containers" / name / "Data").mkdir(parents=True)
-        with mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(pathlib.Path, "home", staticmethod(lambda: home)):
             targets = self.installer.script_targets()
         self.assertFalse(
             [t for t in targets if "RawPlayer" in str(t) or "IOXPC" in str(t)],
@@ -1129,7 +1145,12 @@ class InstallerTargetTests(unittest.TestCase):
             (prefix / "lib").mkdir()
             (prefix / "lib" / "libpython3.13.dylib").write_bytes(b"")
             (prefix / "bin").mkdir()
-            (prefix / "bin" / "python3").symlink_to(prefix / "bin" / "gone")
+            try:
+                (prefix / "bin" / "python3").symlink_to(prefix / "bin" / "gone")
+            except OSError as exc:
+                # Windows needs Developer Mode or SeCreateSymbolicLinkPrivilege
+                # (WinError 1314); a dangling link cannot be made without one.
+                self.skipTest(f"symlink creation is unavailable: {exc}")
             home = self._python3_home_for(str(prefix))
 
         self.assertFalse(home["usable"])
@@ -1213,7 +1234,7 @@ class InstallerTargetTests(unittest.TestCase):
             self.assertNotIn("homebrew", str(root).lower())
             self.assertIn("Python.framework", str(root))
         self.assertNotIn("homebrew", str(self.installer._FALLBACK_PYTHON3).lower())
-        self.assertEqual(str(self.installer._FALLBACK_PYTHON3), "/usr/local/bin/python3")
+        self.assertEqual(self.installer._FALLBACK_PYTHON3.as_posix(), "/usr/local/bin/python3")
 
     def test_a_lua_canary_ships_with_every_probe(self) -> None:
         # Lua always enumerates, so the canary separates "Python not detected"
@@ -1382,6 +1403,14 @@ class InstallerTargetTests(unittest.TestCase):
         import pathlib
         import tempfile
 
+        if os.name == "nt":
+            # Windows ignores the read-only attribute on directories, so mode
+            # bits cannot make one unwritable. A regular file where the parent
+            # directory should be makes creating the target fail with OSError
+            # just the same, which is the failure install() has to survive.
+            blocker = pathlib.Path(tempfile.mkdtemp(prefix="readonly_")) / "not-a-directory"
+            blocker.write_bytes(b"")
+            return blocker / "Utility"
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root ignores mode bits, so nothing is unwritable")
         parent = pathlib.Path(tempfile.mkdtemp(prefix="readonly_"))

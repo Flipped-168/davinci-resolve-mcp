@@ -1735,7 +1735,14 @@ API_TRUTH: List[Dict[str, Any]] = [
                        "list_subtitle_presets / copy_subtitle_preset, or "
                        "set_subtitle_preset for named Word Highlight inputs "
                        "inside the nested zlib tool section. These new actions "
-                       "check that Resolve is fully quit BEFORE writing. "
+                       "check that Resolve is fully quit BEFORE database writing. "
+                       "For live Word Highlight effects instead use timeline_ai "
+                       "set_subtitle_preset: native DRT export, patch the exported "
+                       "holder, and native import as a recoverable timeline revision. "
+                       "On Studio 21.1.0.17/Windows (2026-10-08), colour, size and "
+                       "position changed visibly without quitting Resolve; clip/caption "
+                       "bounds and media IDs matched the original. This does not add a "
+                       "native subtitle setter or establish other effects/builds. "
                        "Holder Duration is preserved; its rendering semantics "
                        "and per-caption preset layouts remain unverified.",
         "tags": ["missing-method", "subtitle", "style", "preset"],
@@ -2948,17 +2955,40 @@ API_TRUTH: List[Dict[str, Any]] = [
         "submit": "missing",
     },
     {
-        "symbol": "Resolve.SetHighPriority (write-only, irreversible per session)",
+        "symbol": "Resolve.SetHighPriority (write-only; irreversible before 21.1)",
         "object": "Resolve",
-        "signature": "() -> Bool",
-        "reality": "Raises the Resolve process priority; there is no getter "
-                   "and no way to lower it again through the API (confirmed "
-                   "absent from dir() on Studio 19.1.3.7).",
-        "recommended": "Call it only when the user asked for a long render on "
-                       "a dedicated machine; state cannot be read back or "
-                       "undone without restarting Resolve.",
-        "tags": ["app-control", "missing-method", "readback"],
+        "signature": "() -> Bool  (19.x); (highPriority: bool) -> bool  (21.1 typed stub)",
+        "reality": "VERSION-SCOPED. On Studio 19.1.3.7 (measured here) the "
+                   "method takes no argument and raises priority; there is no "
+                   "getter and no way to lower it again through the API "
+                   "(no getter in dir()), so it is irreversible for the session. "
+                   "Resolve 21.1 retyped it SetHighPriority(highPriority: bool) "
+                   "-> bool, documented as 'script execution priority to high or "
+                   "normal'. Reported by @legionsound (issue #207) from Studio "
+                   "21.1.0.14 on macOS, 2026-09-09; NOT reproduced here (no 21.1 "
+                   "install). One live session, in order: (False) -> True, "
+                   "(True) -> True, () -> False, (1) -> False, ('high') -> False, "
+                   "(False) -> True. So on 21.1 the no-argument call is a NO-OP "
+                   "that reports its own failure, only a real bool is accepted "
+                   "(1 and 'high' are rejected like the missing argument), and "
+                   "the setting is REVERSIBLE: SetHighPriority(False) restores "
+                   "normal. There is still no getter on any build — dir() on the "
+                   "live 21.1 Resolve object shows SetHighPriority as the only "
+                   "priority-related name — so the current state cannot be read "
+                   "back on either generation.",
+        "recommended": "On 21.1+ pass a real bool; never forward 1 or a string "
+                       "(coerce first — resolve_control set_high_priority and "
+                       "granular set_high_priority do, and refuse values that "
+                       "name no boolean). On older builds call it only when the "
+                       "user asked for a long scripted job on a dedicated "
+                       "machine: it cannot be lowered without restarting "
+                       "Resolve, which is why both tools refuse high=false "
+                       "there. No build offers readback, so report the native "
+                       "return, never a confirmed state.",
+        "tags": ["app-control", "missing-method", "readback", "version-gated", "reported"],
         "submit": "missing",
+        "issue": 207,
+        "mitigation": ["resolve_control.set_high_priority", "set_high_priority"],
     },
     {
         "symbol": "Project.IsRenderingInProgress (stuck True after deleting the rendering project)",
@@ -3464,6 +3494,86 @@ API_TRUTH: List[Dict[str, Any]] = [
         "tags": ["dctl", "validation", "unreliable-return", "version-gated", "reported"],
         "submit": "bug",
     },
+    {
+        "symbol": "Project.StartRendering",
+        "object": "Project",
+        "signature": "(jobIds: list[str], isInteractiveMode=False) -> bool  (21.1 typed stub)",
+        "reality": "STATE-DEPENDENT RETURN. Reported by @legionsound (issue #207) "
+                   "from Studio 21.1.0.14 on macOS, 2026-09-09; NOT reproduced "
+                   "here (no 21.1 install). In one session, some freshly "
+                   "configured render jobs made StartRendering return False and "
+                   "remain Ready, while an identical job configured later in the "
+                   "same session started and completed. Official direct calls "
+                   "reproduced BOTH outcomes, so a False from one interface and a "
+                   "True from another in that sequence is not an interface "
+                   "difference. The trigger was not isolated; no root cause is "
+                   "established. The same session confirmed the two 21.1 "
+                   "RenderSettings keys the compound whitelist used to drop: "
+                   "UseUniqueFilenames=True gave queued filenames Resolve's "
+                   "'_V1-0001' suffix, and AudioFormat='wav' with LPCM produced "
+                   "complete 14-second stereo 48 kHz 24-bit WAVs whose decoded PCM "
+                   "matched byte for byte across both community interfaces.",
+        "recommended": "Treat the boolean as a hint in both directions. After "
+                       "start, read render(action='get_job_status') and "
+                       "render(action='verify_output') for the actual output file "
+                       "before reporting a render as running or done; a False "
+                       "with the job still Ready means nothing rendered. Do not "
+                       "auto-retry in a wrapper: the measured later success was a "
+                       "NEW identical job, not a retry of the same one, so a loop "
+                       "would hide the state it depends on. Surface the False and "
+                       "let the caller decide whether to re-queue.",
+        "tags": ["render", "unreliable-return", "state-dependent", "version-gated", "reported"],
+        "submit": "bug",
+        "issue": 207,
+        "verified_on": "DaVinci Resolve Studio 21.1.0.14",
+    },
+    {
+        "symbol": "Project settings presets mutated before the project's first SaveProject",
+        "object": "Project",
+        "signature": "SaveCurrentProjectSettingsAsNewPreset / UpdateProjectSettingsPreset / "
+                     "SetProjectSettingsPreset / DeleteProjectSettingsPreset (presetName) "
+                     "-> bool  (21.1+)",
+        "reality": "DESTROYS THE PROJECT ITSELF, NOT A GRADE, AND REPORTS SUCCESS "
+                   "THROUGHOUT. Reported by @legionsound (issue #207) from Studio "
+                   "21.1.0.14 on macOS, 2026-09-09; NOT reproduced here (no 21.1 "
+                   "install). On a NEW project that had never been saved: save a "
+                   "project-settings preset (SaveCurrentProjectSettingsAsNewPreset), "
+                   "change the timeline resolution, then update "
+                   "(UpdateProjectSettingsPreset), apply (SetProjectSettingsPreset) "
+                   "and delete (DeleteProjectSettingsPreset) the preset, then "
+                   "SaveProject and close. Every native call returned True. "
+                   "SQLite PRAGMA integrity_check on the project database still "
+                   "reported ok, but its Sm2MultiSysData table had ZERO rows, and "
+                   "LoadProject then failed with 'DaVinci Resolve failed to open "
+                   "project.' Reproduced twice, through community wrappers and "
+                   "through direct native calls. The control — the same sequence "
+                   "with one explicit SaveProject BEFORE any preset mutation — kept "
+                   "its Sm2MultiSysData row and reopened. Which single call in the "
+                   "sequence is responsible was not isolated, and preset "
+                   "Export/Import were not part of it, so do not assume any preset "
+                   "write is safe on an unsaved project. "
+                   "ProjectManager.GetProjectLastModifiedTime cannot serve as a "
+                   "'has this project been saved' guard: it returned None even for "
+                   "saved projects on the same build.",
+        "recommended": "Before ANY project-settings-preset write on 21.1, call "
+                       "ProjectManager.SaveProject() on the current project and "
+                       "require it to return True; never mutate presets on a "
+                       "project created in this session that has not been saved. "
+                       "Do not read the True returns, a clean integrity_check, or "
+                       "the absence of an error as evidence the project survived "
+                       "— the only proof is closing it and reloading it. A "
+                       "wrapper must not save silently on the caller's behalf "
+                       "(the first save is the caller's decision), so it should "
+                       "require an explicit assertion that the project has been "
+                       "saved, and refuse without one. If the project already "
+                       "holds work, back it up (export a .drp) before the first "
+                       "preset write.",
+        "tags": ["destructive", "unrecoverable", "project", "order-dependent",
+                 "silent-failure", "unreliable-return", "version-gated", "reported"],
+        "submit": "bug",
+        "issue": 207,
+        "verified_on": "DaVinci Resolve Studio 21.1.0.14",
+    },
     # ── Measured on Studio 21.1.0.14, 2026-09-09 (trap-aware execution work) ──
     {
         "symbol": "TimelineItem.CopyGrades",
@@ -3707,6 +3817,10 @@ ACTION_SYMBOLS: Dict[Tuple[str, str], List[str]] = {
     ("fusion_comp", "add_modifier"): ["Tool.AddModifier", "Tool.AddModifier (NestControl inputs)"],
     ("fusion_comp", "add_keyframe"): ["Tool.AddModifier (NestControl inputs)"],
     ("project_manager", "safe_project_archive"): ["ProjectManager.ArchiveProject"],
+    ("render", "start"): ["Project.StartRendering"],
+    ("resolve_control", "set_high_priority"): [
+        "Resolve.SetHighPriority (write-only; irreversible before 21.1)",
+    ],
 }
 
 

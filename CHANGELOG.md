@@ -2,6 +2,253 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.13.1 — Windows: liveness checks no longer kill the process they check, and the offline suite runs clean
+
+Closes #278, reported by @AllastorV with the failures grouped by cause. Nobody
+here runs Windows, so everything below was worked out from the code and
+simulated on macOS: the Windows-only API calls are covered by tests that run
+only on Windows.
+
+### Fixes
+
+- **On Windows, three pid liveness checks terminated the process they asked
+  about.** Python's `os.kill(pid, 0)` is a harmless existence check on POSIX,
+  but on Windows any signal other than `CTRL_C_EVENT`/`CTRL_BREAK_EVENT` goes
+  through `TerminateProcess`. `resolve_busy._pid_alive` (the busy sidecar),
+  `mcp_transport.read_transport_state` (the networked-transport state file)
+  and `server._control_panel_pid_alive` (the control-panel pidfile) used it,
+  and all three are routinely asked about the server's own pid. On Windows they
+  now use `proc.windows_pid_alive` (`OpenProcess` + `WaitForSingleObject`, the
+  approach the bridge already used); POSIX is unchanged. A new AST guard fails
+  the suite if a signal-0 probe lands in `src/` without a Windows branch.
+- **`.gitattributes` pins `eol=lf` on the 32 generated agent-rule files**, so
+  a default `core.autocrlf=true` checkout no longer fails
+  `generate.mjs --check`. Existing Windows clones need
+  `git add --renormalize .` or a fresh checkout.
+
+### Tests (Windows portability, no behaviour change)
+
+- **SQLite handles closed before temp dirs are removed** (56 tests across
+  `test_resolve_ai_ledger`, `test_resolve_ai_governance`,
+  `test_resolve21_actions`, `test_provenance`, `MediaAnalysisPlanningTests` and
+  others). Each class follows the existing pattern, closing with
+  `timeline_brain_db.close_all` registered so it runs before the removal. No
+  central hook was added, so a test that leaks a handle still shows. The list
+  came from a macOS run that flags any removal under a live connection: 56
+  before, 0 after.
+- Path expectations are built the way the code builds them, not as POSIX
+  strings (`test_cdl_and_install_config` and others).
+- Symlink-dependent cases skip, with the `OSError` as the reason, when the
+  process cannot create symlinks.
+- One-offs: `sys.executable` instead of `python3`/`cat`; `tempfile.gettempdir()`
+  instead of a literal `/tmp`; the home directory stays resolvable
+  (`USERPROFILE` as well as `HOME`); sandbox-container installer tests pinned
+  to macOS; the unwritable-target installer tests reworked so they still test
+  Windows; a stale `taskkill` expectation updated; `proc.kill()` instead of
+  `SIGKILL`.
+
+## What's New in v4.13.0 — Resolve 21.1 render-setting parity, `SetHighPriority(bool)`, and a project-destroying preset order
+
+Lands the three items queued for @legionsound in #207. The 21.1 behaviour
+below is **their measurement on Studio 21.1.0.14 / macOS**, recorded as
+*reported*; this machine runs 19.1.3.7 and did not reproduce it.
+
+### New
+
+- **`resolve_control set_high_priority` takes `high`** (alias
+  `high_priority`, default `true`), and there is a new granular
+  **`set_high_priority(high)`** tool. On 21.1+ it calls
+  `SetHighPriority(bool)`, which 21.1 types as script execution priority and
+  which is reversible there: `high=false` restores normal. The no-argument call
+  this server used to make returns `False` on 21.1 and does nothing. Builds
+  before 21.1 keep the no-argument call, and `high=false` is refused on them,
+  because they cannot lower priority without a restart. `high` is coerced
+  (`"false"` is false); anything that doesn't name a boolean is refused before
+  any call. No build has a getter, so results carry `readback: null` and claim
+  no readback. Registered as a write in both the destructive registry and the
+  lifecycle risk sets (MEDIUM).
+- **Compound render settings accept `AudioFormat` and `UseUniqueFilenames`.**
+  The compound whitelist held 31 of the 33 typed `RenderSettings` fields and
+  reported these two as ignored; granular already forwarded them. A test now
+  checks the whitelist against every field of the bundled 21.1 stub's
+  `RenderSettings`. `UseUniqueFilenames` is coerced on every path (compound
+  `set_settings`, `safe_set_render_settings`, `prepare_render_job`, granular
+  `set_render_settings`), and an unrecognised value is refused with
+  `INVALID_RENDER_SETTING`. `AudioFormat` with `ExportVideo: true` warns,
+  since the stub documents it for audio-only renders.
+
+### API truth ledger
+
+- **`Project.StartRendering` is state-dependent** (reported, 21.1.0.14):
+  freshly configured jobs sometimes return `False` and stay Ready, while an
+  identical later job completes. Direct official calls reproduced both
+  outcomes. Mapped to `render start`, so the fact rides on its results. Verify
+  job status and output; nothing retries automatically.
+- **Project-settings presets mutated before a project's first `SaveProject`
+  destroy the project** (reported, 21.1.0.14, reproduced twice): saving a
+  preset, changing resolution, then updating, applying or deleting the preset,
+  then saving and closing. Every call returned `True` and SQLite
+  `integrity_check` said `ok`, but `LoadProject` then failed with "DaVinci
+  Resolve failed to open project". Save the project once before any preset
+  write, and prove it survived only by reloading it. No preset-write wrappers
+  ship yet; this entry lands first on purpose.
+- The `Resolve.SetHighPriority` entry is now version-scoped: irreversible with
+  no argument before 21.1 (measured on 19.1.3.7), and a reversible boolean on
+  21.1 (reported).
+
+### Counts
+
+- Granular tools 389 → 390; compound stays at 37. Docs and generated agent
+  rules updated.
+
+## What's New in v4.12.0 — Live subtitle presets and title text across Fusion title tools
+
+Contributed by @sidevconcept (#281). The live behaviour below rests on their
+synthetic runs on **Resolve Studio 21.1.0.17 / Windows**; this release was not
+re-measured live here (the maintainer's machine runs 19.1.3.7).
+
+### New
+
+- **`timeline_ai(action="list_title_presets")`** inventories the installed
+  factory Fusion titles and subtitle presets: local archive, category and full
+  template ID. `templates_archive` points it at a custom installation. It is an
+  inventory, not a claim that each preset works live.
+- **`timeline_ai(action="set_subtitle_preset")`** applies an installed subtitle
+  preset and common literal style inputs (font, size, position and so on) to a
+  subtitle track while Resolve stays open. It writes a **new timeline
+  revision** and keeps the original, compares the edit inventory, and re-exports
+  through Resolve to confirm the preset and controls were kept. It restores the
+  original timeline on failure.
+  - `dry_run` / `dryRun` are coerced at the dispatcher, so `"true"` previews
+    and never imports. A preview that would need a live capture is refused.
+  - The result lists `verified_components` (track counts, item names and
+    bounds, media IDs, preset controls) and `unverified_components` (markers,
+    grades, other Fusion comps, audio). Native readback is not render
+    verification, and the revision is not certified as a full copy.
+  - Staging exports are removed on success and kept for diagnosis on failure
+    (`staging_retained`, `staging_directory`).
+- **`timeline.set_title_text` / `get_title_text` reach more than TextPlus.** The
+  Fusion-comp fallback now finds literal text on TextPlus, sText, Text3D and
+  MultiText (`TextN.StyledText` in native `TextOrder`). It follows
+  `StyledTextFollower` and `PublishText` without disconnecting animation, and it
+  skips connected, expression-driven, locked and disabled inputs rather than
+  flattening them. MultiText editing was validated only on Studio 21.1.0.17 /
+  Windows.
+- **`scripts/edit_subtitle_timeline.mjs`** (backed by
+  `resolve-advanced/server/subtitle-timeline.mjs`) inspects an exported
+  subtitle track, or writes a new file with a bundled preset reference
+  (`Word Highlight`, `Lollipop`) or a native subtitle-template reference applied.
+- Synthetic title-library validation scripts write private QA reports with
+  relative image links; `src/utils/qa_privacy.py` replaces host paths and
+  project/timeline names in saved records.
+
+### Docs
+
+- New guides: `docs/guides/title-library-automation.md` and
+  `docs/guides/subtitle-track-editing.md`.
+
+### Verification
+
+- Contributor (Studio 21.1.0.17 / Windows, synthetic media): all 134 installed
+  factory Fusion presets passed native application, literal text/property
+  readback and sampled rendered-frame checks; all 23 subtitle presets applied
+  without a restart.
+- Here: Python offline suite and Node advanced suite (fresh `npm ci`) green;
+  API parity, api-limitations, read/write symmetry, agent-rule drift and
+  `npm pack` clean.
+
+## What's New in v4.11.1 — `.cube` input ranges, `"false"` import flags and the caption character cap
+
+Three fixes from @Dev-next-gen (#286, #287, #288), each with a reproduction and a
+regression test.
+
+### Fixes
+
+- **A 3D `.cube` carrying `LUT_3D_INPUT_RANGE` could not be read** (#288).
+  `read_cube` knew `DOMAIN_MIN`/`DOMAIN_MAX` but not Resolve's own header form,
+  so the line fell through to the data-row branch and the whole file was refused
+  as a "non-numeric entry". `read_lut_summary` and `attenuate_lut_file` both
+  failed on it. The keyword is now read as one domain for all three channels;
+  attenuation still refuses a non-unit range, exactly as it does for
+  `DOMAIN_MIN`/`DOMAIN_MAX`.
+  - **On landing:** a short or non-numeric `LUT_3D_INPUT_RANGE` escaped as a bare
+    `ValueError`, and a short `DOMAIN_MIN`/`DOMAIN_MAX` produced a silently short
+    domain list. All three headers now go through one reader that raises
+    `CubeLutError` naming the file, line and keyword.
+- **`timeline(action="import_timeline_checked")` read `"false"` as true** (#287).
+  `sanitize_media` / `relink_media` and `import_source_clips` were read with bare
+  `bool()`, so `sanitize_media="false"` still handed Resolve the sanitized copy
+  instead of the file passed, and `import_source_clips="false"` reached
+  `ImportTimelineFromFile` as `importSourceClips: True`. Both now go through
+  `_coerce_bool`, as the rest of `server.py` has since v4.8.20.
+- **Caption orphan rebalancing could break `max_chars_per_line`** (#286).
+  Moving the last word of the penultimate line onto a one-word final line never
+  re-checked the cap, so "we had a wonderful conversation" at 20 characters came
+  out with a 22-character second line in the SRT/WebVTT. The move now happens
+  only when the merged line fits; a lone last word is the lesser fault.
+
+## What's New in v4.11.0 — `rename_plan` collides names a case-insensitive volume treats as one
+
+### Fixes
+
+- **`media(action="rename_plan")` missed collisions that only differ in case
+  or Unicode form.** macOS (default APFS) and Windows volumes are
+  case-insensitive, and APFS also ignores Unicode normalization, so renaming
+  `take_A.mov` to `A.mov` overwrites an existing `a.mov`. The plan compared
+  names byte-for-byte and reported that rename as free (`collisions: 0`).
+  - Targets are now compared after NFC normalization and lowercasing, so
+    `A.mov` / `a.mov` and `café` spelled precomposed or with a combining
+    accent each count as one file.
+  - A case-only rename of a single file (`clip.MOV` → `clip.mov`) is still a
+    `rename`, not a collision.
+
+### New parameter
+
+- `rename_plan` takes `caseSensitive` (default `false`). Pass `true` only for
+  a case-sensitive volume to restore exact comparison. The result reports the
+  mode used as `caseSensitive`.
+
+### Validation
+
+- Offline planning only; nothing calls Resolve or touches files. New
+  `media-ops` test fails on the old code and passes now; `group-grade-read`
+  gains a case for a group name with `"`, `<` and `>`, as Studio 19.1.3.7
+  escapes them.
+
+## What's New in v4.10.7 — `retargetDRT` moves the `<ProjectVersion>` import gate, not only the comment stamp
+
+### Fixes
+
+- **`retargetDRT` / `retargetDRP` produced files an older Resolve still
+  refused.** Resolve decides "A newer version of DaVinci Resolve is needed to
+  import" on project.xml's `<ProjectVersion>` element; it never reads the
+  `DbAppVer="…" DbPrjVer="…"` comment for that decision. The vendored
+  `drt-format/resolve-versions.js` rewrote the comment on every XML member and
+  left the element alone, so a DRP "retargeted" to 19 still carried 17 inside.
+  - **The bundled project shell had the same hole.** It is a 20.3.2 export
+    with `<ProjectVersion>15</ProjectVersion>`, so a tool-built DRT retargeted
+    to 19 shipped a shell Resolve 19 cannot open.
+  - `restampVersions` now also moves any `<ProjectVersion>` element to the
+    target's DbPrjVer, whatever its current value. A DRP's kept project.xml
+    and the added shell both land on the target schema. DRX and
+    SeqContainer/MpFolder XML carry no such element and are unchanged;
+    unrelated numbers in the body are untouched.
+  - The `drt` tool's `downgrade` and `assemble` actions patched the element
+    themselves and were never affected; the library on its own was.
+
+### Validation
+
+- Tests: gate moved for a DRP's project.xml and for the shell at every
+  registry target (19, 20, 21); null control that XML without the element
+  gains none and keeps its other numbers; the pre-fix module leaves the gate
+  at 17 on the same input.
+- Vendored drt-format suites: 51 pass, 0 fail, 1 pre-existing skip (missing
+  fixture). Server drt suites (downgrade, assemble, events): 32/32.
+- Manual import, 2026-10-13: a Resolve 21.0.3 timeline (schema 17) imported
+  into Resolve 19.1.3 once the element read 14. The `.drp` round-trip harness
+  was not run: it needs a Resolve 21.x Studio host, and this machine runs
+  19.1.3.7.
+
 ## What's New in v4.10.6 — names that need xml escaping reach their bin and their color group
 
 ### Fixes

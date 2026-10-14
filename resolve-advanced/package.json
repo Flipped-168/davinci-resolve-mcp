@@ -15,6 +15,7 @@
   "files": [
     "server/**/*.mjs",
     "vendor/**",
+    "assets/**",
     "!vendor/conform-qc/__fixtures__/**",
     "README.md",
     "LICENSE"

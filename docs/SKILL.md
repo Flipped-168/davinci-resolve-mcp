@@ -353,7 +353,7 @@ to the user as verified.
 | Mode | Entry point | Tool count | Use when |
 |---|---|---|---|
 | Compound (default) | `src/server.py` | 37 tools | Most workflows — keeps context lean |
-| Granular (full) | `src/server.py --full` | 389 tools | Power users needing one tool per API method |
+| Granular (full) | `src/server.py --full` | 390 tools | Power users needing one tool per API method |
 
 Resolve 21.1 adds [twelve read-only discovery controls](reference/resolve211-read-controls.md)
 for edition, presets, audio formats/codecs, normalization modes, speed, fades
@@ -418,7 +418,22 @@ Operating rules an agent must know:
   `iConfirmProjectClosed:true`; every write auto-backs-up and read-back
   verifies. Resolve caches open projects in memory: after patching, fully QUIT
   and relaunch Resolve or the patch will not be visible.
-- **Subtitle DB edits**: `project_db` `list_captions` / `write_captions` /
+- **Live subtitle effects**: use `timeline_ai.set_subtitle_preset` with Resolve
+  open. `timeline_ai.list_title_presets` discovers installed title/subtitle names
+  and full IDs. `preset` accepts a bundled or installed subtitle preset; omit it
+  to adjust the existing effect. `inputs` accepts common literal font/style,
+  size/position and text RGBA; highlight/outline controls are Word Highlight-specific.
+  Native DRT export/edit/import creates and selects a recoverable revision,
+  preserving the original. Do not ask the user to quit or relaunch for effects.
+  Render frames to verify appearance; inventory/readback alone is insufficient.
+  Installed presets are captured through the native title API in a temporary
+  timeline, then applied to the subtitle track. Common controls also work for
+  Lollipop. Never guess unmapped effect controls. `preset_reference` accepts a
+  native subtitle DRT; unbundled dry runs require such a reference.
+  Ordinary title presets use `timeline.insert_fusion_title` with the full ID,
+  then scoped `fusion_comp` probes and input writes. See
+  [title library automation](guides/title-library-automation.md) for acceptance.
+- **Offline subtitle DB edits**: `project_db` `list_captions` / `write_captions` /
   `check_captions` cover text, bounds, explicit per-word timing, add and delete.
   `list_subtitle_presets` / `copy_subtitle_preset` / `set_subtitle_preset` handle
   animated Fusion holders separately from basic `list_subtitle_styles`.
@@ -781,6 +796,12 @@ Key actions:
   is fine. No connection needed, and it never launches Resolve
 - `get_page` / `open_page(page)` — read or switch the active page
 - `get_keyframe_mode` / `set_keyframe_mode(mode)`
+- `set_high_priority(high?)` — script execution priority (granular:
+  `set_high_priority`). `high` defaults to true; on Resolve 21.1+ it calls
+  `SetHighPriority(bool)` and `high=false` restores normal. Older builds take no
+  argument and cannot lower it again this session, so `high=false` is refused
+  there. No build has a getter — report the native return, never a confirmed
+  state. Only call when the user asked for it
 - `get_fairlight_presets` — Resolve 20.2.2+; returns available Fairlight
   preset names
 - `list/save/load/delete/import/export_user_preferences_preset` — Resolve
