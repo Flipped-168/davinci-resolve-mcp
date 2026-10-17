@@ -2,6 +2,131 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.13.7 — Missing-media relink works for paths written on another OS
+
+Lands #294, the follow-up to #293 for the Windows/macOS path work tracked in
+#278. A project moved between macOS and Windows keeps the paths the other OS
+wrote, so the missing-media diagnosis and relink plan now go by the path's own
+form.
+
+### Fixed
+
+- **Wanted basename (`src/server.py`, `_missing_media_diagnosis` and
+  `_build_relink_plan`)**: both used `os.path.basename`, which splits on the
+  running OS's separator only. On macOS the basename of `E:\DCIM\P1047043.MOV`
+  was the whole string, so a bounded search could never match. Both now split
+  on `/` and `\`.
+- **Volumes from another OS**: after #293, `E:\` on macOS (or `/Volumes/X` on
+  Windows) counted as an unmounted volume. That skipped the relink search and
+  advised mounting a volume this OS can never mount. Such roots are now flagged
+  `foreign_os_path` on volume, folder, item and candidate rows, and are never
+  probed with `isdir`. They report the new
+  `primary_cause="foreign_os_path"`, which advises searching the approved roots,
+  and they no longer trigger `skip_search_when_volume_missing`. A same-OS
+  unmounted volume behaves as before. When both kinds are present, the advice
+  names both.
+- **Sanitized relink plans**: with `sanitized=true`, `file_path` is dropped, so
+  the plan searched by the Resolve clip name. It now takes the basename from
+  `file_path_sanitized`, which keeps the filename.
+
+### Documentation
+
+- `docs/SKILL.md` documents `foreign_os_path`.
+
+### Validation
+
+- New `ForeignOsMediaPathTests` and basename/form tables pin the host OS, so
+  Linux, macOS and Windows CI all run both directions. Linux CI green on the PR.
+- Full offline suite and release static checks pass on macOS.
+- Diagnosis only, with no Resolve API call changed, so a live test is not
+  required.
+
+## What's New in v4.13.6 — `drt` downgrade stamps the real Resolve build
+
+### Fixed
+
+- **`drt(action='downgrade')` (`resolve-advanced/server/tools/drt.mjs`)**: the
+  `DbAppVer` stamp was built by padding `targetAppVersion` to four parts, so
+  `19.1.3` became `19.1.3.0`, a build no Resolve has ever written. The vendored
+  version registry already records the real stamps read from Resolve's own
+  exports (19 → `19.1.3.0007` / 14, 20 → `20.3.2.0009` / 15, 21 →
+  `21.0.0.0048` / 17), and the vendored retarget path used them, so the two
+  re-stamp paths disagreed in every XML member. `DbPrjVer` now comes from an
+  explicit `targetProjectVersion`, then the registry row for that major, then
+  the known gate map. Resolve 20, which the map never had, now resolves to
+  schema 15 instead of throwing. `DbAppVer` comes from an explicit
+  `appVersionString`, then the registry row (only when its schema matches the
+  one being written), then the old padded form, which is now labelled and
+  warned about.
+- The result gains `projectVersionSource`, `appVersionSource`, `registryRow`
+  and, when a fallback was used, `warnings`.
+
+### Validation
+
+- 6 new cases in `resolve-advanced/test/drt-downgrade.test.mjs`. All 6 fail
+  against the previous `drt.mjs`. All `drt*.test.mjs` pass: 42/42.
+- Offline Python suite and the release static checks pass. Offline file
+  authoring only; no live Resolve import was run for this change.
+
+## What's New in v4.13.5 — Missing-media diagnosis finds Windows drive and UNC volumes
+
+Lands #293 from @AllastorV, case 4 of the Windows failures tracked in #278.
+With #291 and #292, his Windows 11 run of the offline suite is now clean.
+
+### Fixed
+
+- **Volume roots (`src/server.py`, `_media_path_volume_root` and
+  `_sanitize_media_path`)**: both helpers split on `os.sep`, so they followed
+  the OS running the server rather than the path's own form. Neither recognised
+  a Windows drive or UNC root. An unplugged card (`E:\DCIM\...`,
+  `\\nas\share\...`) never produced `volume_not_mounted`, and the relink plan
+  ran a full search instead of saying "mount the volume". On Windows a
+  `/Volumes/<name>` path came out as a single part. Both helpers now split on
+  `/` and `\`, and treat `X:\` and `\\server\share` as the volume root
+  alongside the existing `/Volumes/<name>` rule.
+- Sanitized paths keep the volume and hide the rest, in the path's own
+  separator: `E:\...\clip.mov`, `\\nas\share\...\clip.mov`. POSIX output is
+  unchanged.
+- New `MediaPathFormTests` use Windows-form fixtures and pure string checks, so
+  they run on every platform.
+
+## What's New in v4.13.4 — Windows: the bridge claims its port exclusively
+
+Lands #292 from @AllastorV, case 2 of the Windows failures tracked in #278.
+
+### Fixed
+
+- **In-Resolve bridge (`src/utils/resolve_bridge.py`)**: on Windows
+  `SO_REUSEADDR` means "share a live port", not "rebind past `TIME_WAIT`", so a
+  new bridge bound on top of a stale one, the orphan check never raised
+  `BridgeConfigError`, and which bridge answered was undefined. On Windows the
+  listener now sets `SO_EXCLUSIVEADDRUSE` and leaves `allow_reuse_address` off,
+  so a second bind fails and the existing orphan message explains it. POSIX is
+  unchanged. Stopping and immediately restarting on the same port still works on
+  Windows (checked after 1 and 20 requests, with 20 `TIME_WAIT` rows).
+- **Windows users of the free-edition bridge:** the installer copies
+  `resolve_bridge.py` into Resolve's scripts folder, so re-run
+  `python scripts/install_resolve_bridge.py` to pick up this fix.
+
+## What's New in v4.13.3 — No bridge running is reported as unavailable, not as a modal dialog
+
+Lands #291 from @AllastorV, case 3 of the Windows failures tracked in #278.
+
+### Fixed
+
+- **Bridge client (`src/utils/resolve_bridge_client.py`)**: a timeout while
+  connecting to the in-Resolve bridge now raises `BridgeUnavailable` ("Start it
+  from Workspace > Scripts > resolve_bridge") instead of `bridge_timeout`
+  ("check for an open modal dialog"). On Windows a refused loopback connect
+  retries the SYN for about 2 s (measured 2.04 s), so with the 1 s timeout a
+  user with no bridge running was sent looking for a dialog. The kernel
+  completes the TCP handshake even while a modal dialog blocks Resolve, so a
+  connect that times out never means a dialog. A timeout after the connection
+  is up is still `bridge_timeout`. One timeout value, no new setting.
+- Two tests patch `socket.create_connection`, so Linux and macOS CI exercise the
+  Windows timing: a connect timeout is `BridgeUnavailable`, a read timeout is
+  still `bridge_timeout`.
+
 ## What's New in v4.13.2 — Three more Windows test failures fixed
 
 Lands #289 from @AllastorV, who re-ran the offline suite on v4.13.1 on Windows
