@@ -2,6 +2,77 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.14.1 — Setup finds the Mac App Store Studio bundle
+
+Fixes #299.
+
+### Fixed
+
+- **macOS path detection (`install.py`, `src/utils/resolve_runtime.py`, `src/utils/platform.py`, `scripts/doctor.py`)**:
+  the Mac App Store Studio build installs as `/Applications/DaVinci Resolve Studio.app`
+  and keeps `Developer/Scripting` inside the bundle. Setup only knew the installer
+  layout and the free App Store app, and the process check required a path ending
+  in `DaVinci Resolve.app`, so a running Studio app was reported as not running.
+  The installer bundle is still preferred when it is present. App Store Studio is
+  next, then the free App Store app. Auto-launch and restart use that same order.
+
+### Validation
+
+- Path-detection unit tests pass, including the Studio process name, the in-bundle
+  scripting directory, and setup's candidate table.
+- Release static checks pass.
+- The Mac App Store Studio bundle was not connected live. It is not installed on
+  the release machine. The installer app and the free App Store app are.
+
+## What's New in v4.14.0 — Subtitle presets install, and frame capture puts the render page back
+
+Lands #298. Closes #297 and #296. #295 is only the controls the Word Highlight
+macro actually stores.
+
+### Fixed
+
+- **`timeline_ai.set_subtitle_preset` (`src/utils/subtitle_live.py`, `install.py`)**:
+  a fresh installer or control-panel setup never installed `resolve-advanced`'s
+  Node packages, so the first preset call died with `ERR_MODULE_NOT_FOUND`
+  for `jszip`. Setup now runs `npm install --omit=dev --omit=optional` in
+  that directory, and a missing install returns that command instead of the
+  raw Node error.
+- **`timeline_frame` capture (`src/server.py`)**: the single-frame render
+  switched format before it had an output folder, then deleted that folder
+  even when Deliver was still pointed at it. That left the project on JPEG
+  and raised Resolve's "Render Path Inaccessible" dialog. The folder is set
+  first, the previous format and codec are restored as ids (`H264`, not the
+  Deliver label `H.264`), and the temporary folder is removed only after the
+  previous path is back. A project that never had a render path keeps the
+  folder. A timeline with subtitles is told the still does not include them:
+  `ExportSubtitle` cannot be toggled for one frame and then restored.
+
+### Added
+
+- **Word Highlight drop shadow and alignment**: `shadowEnabled`,
+  `shadowRed`/`shadowGreen`/`shadowBlue`, `shadowOffset`, `shadowSoftness`
+  and the X/Y pair, plus `horizontalAlign`/`verticalAlign`. The shadow is
+  shading element 8, a drop shadow, not a stroke on every word. The centred
+  bundled reference stores justification `3`. A dry run lists
+  `editableInputs`. Per-word scale and cue in/out transitions stay refused.
+
+### Documentation
+
+- `docs/guides/subtitle-track-editing.md`, `docs/SKILL.md`, and the control
+  panel setup note describe the new controls and the Node install.
+
+### Validation
+
+- Subtitle codec suites and the frame-capture, subtitle-gap, and Node-provision
+  unit tests pass.
+- Live page-restore harness on Resolve Studio 19.1.3.7 (`--repeat 1`): captures
+  from every page restored format, path, mode, and page, with no warnings once
+  a render path existed. The open session was 19.1, not 21.1.
+- The shadow and alignment round-trip was checked against the bundled Word
+  Highlight export from Studio 21.1. A live dry run on a track created with
+  `AddTrack("subtitle")` stops before those controls: that track has no Fusion
+  preset holder.
+
 ## What's New in v4.13.7 — Missing-media relink works for paths written on another OS
 
 Lands #294, the follow-up to #293 for the Windows/macOS path work tracked in

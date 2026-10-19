@@ -91,7 +91,7 @@ if not logging.getLogger().handlers:
         handlers=[logging.StreamHandler()],
     )
 
-VERSION = "4.13.7"
+VERSION = "4.14.1"
 logger = logging.getLogger("davinci-resolve-mcp")
 logger.info(f"Starting DaVinci Resolve MCP Server v{VERSION}")
 logger.info(f"Detected platform: {get_platform()}")
@@ -422,8 +422,9 @@ def _launch_resolve():
     """Launch DaVinci Resolve and wait for it to become available."""
     sys_name = platform.system().lower()
     if sys_name == "darwin":
-        app_path = "/Applications/DaVinci Resolve/DaVinci Resolve.app"
-        if not os.path.exists(app_path):
+        from src.utils.resolve_runtime import MACOS_RESOLVE_APPS
+        app_path = next((p for p in MACOS_RESOLVE_APPS if os.path.exists(p)), None)
+        if not app_path:
             return False
         subprocess.Popen(["open", app_path], stdin=subprocess.DEVNULL)
     elif sys_name == "windows":
