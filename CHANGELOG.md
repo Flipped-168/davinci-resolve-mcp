@@ -2,6 +2,77 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.14.4 — Compatible dependency updates
+
+Lands #303, #304, #305, #306, and #308. Resolves #307, #309, and #310.
+
+### Maintenance
+
+- Update fast-xml-parser to 5.11.2, JSZip to 3.10.2, Zod to 4.6.7,
+  PostgreSQL client pg to 8.23.1, and development formatter Prettier to 3.9.10.
+- Align the published root package with the advanced-server dependency ranges
+  and audited lockfile versions, including the MCP SDK and sharp security fixes.
+- Group weekly patch/minor Dependabot updates across both package manifests.
+- Defer js-yaml v5 because its default merge-key and empty-input behavior changes
+  existing YAML specs. Defer native better-sqlite3 major upgrades for an explicit
+  compatibility review; v13 requires Node 22 while this project supports Node 20.9.
+
+### Validation
+
+- Full advanced-server Node suite: 1,141 passed, 60 skipped, zero failed.
+- Root and advanced-server npm audits report zero vulnerabilities.
+- Required release static checks pass. Control-panel documentation reviewed;
+  no panel behavior or navigation changed.
+- No Resolve scripting or project authoring behavior changed; live Resolve
+  validation is not required for these dependency and maintenance updates.
+
+## What's New in v4.14.3 — Secure footage indexing
+
+### Security
+
+- Fix argument injection in `conform.relink_scalefix` (GHSA-x29h-6rgf-w233).
+  Replace the `find` subprocess with Node filesystem traversal so caller-supplied
+  footage roots cannot execute commands or inject filesystem operations.
+- Validate all footage roots before indexing. Preserve recursive MOV/MP4 indexing,
+  proxy exclusions, relative paths, file symlinks, and duplicate filtering;
+  skip nested directory symlinks and handle filenames containing newlines safely.
+- Thanks to HexMystic for reporting the vulnerability.
+
+### Validation
+
+- Focused conform and vendor suite: 121 passed, 30 skipped, zero failed.
+- Full advanced-server Node suite: 1,141 passed, 60 skipped, zero failed using
+  the Node runtime matching the installed native dependencies.
+- Required release static checks pass. Control-panel documentation reviewed;
+  no panel behavior or navigation changed.
+- No Resolve scripting or project authoring behavior changed; live Resolve
+  validation is not required for this filesystem indexing fix.
+
+## What's New in v4.14.2 — Refresh advanced-server dependencies
+
+Lands #302. Fixes #301.
+
+### Fixed
+
+- Refresh `resolve-advanced/package-lock.json` within the existing dependency
+  ranges to resolve five npm audit findings: MCP SDK 1.32.1, fast-uri 3.1.8,
+  hono 4.13.13, ip-address 10.7.4, and proxy-addr 2.0.8. The compatible sharp
+  platform packages also update. Dependency ranges are unchanged.
+- Refresh the root package lockfile for the release.
+
+### Maintenance
+
+- Add weekly Dependabot updates for `/resolve-advanced`.
+
+### Validation
+
+- Production-only and full advanced-server npm audits report zero vulnerabilities.
+- Advanced-server Node suite: 1,137 passed, 60 skipped, zero failed, with the
+  media-template cache directed to scratch space.
+- Required release static checks pass. Control-panel documentation reviewed;
+  no panel behavior or navigation changed.
+- No Resolve behavior changed; live Resolve validation is not required.
+
 ## What's New in v4.14.1 — Setup finds the Mac App Store Studio bundle
 
 Fixes #299.
