@@ -2,6 +2,187 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.15.2 — Bridge installer and large marker blobs
+
+Two contributor fixes.
+
+### Fixed
+
+- **The bridge installer no longer writes into Blackmagic Disk Speed Test's
+  sandbox container** (#315, thanks @gatezh). The macOS installer treats every
+  `com.blackmagic-design.*` container as a possible sandboxed Resolve and
+  excludes the known helpers by name, but Disk Speed Test was missing from
+  that list. The installer copied the bridge scripts and a copy of
+  `bridge.json`, auth token included, into a container Resolve never reads,
+  and the inflated canary count told users to expect 4 Scripts-menu entries
+  where Resolve shows 2. Files already written there are harmless apart from
+  the token copy and can be deleted by hand from
+  `~/Library/Containers/com.blackmagic-design.DiskSpeedTest/Data/Library/Application Support/`.
+- **Marker blobs over 128 KiB are now valid zstd** (#313, thanks
+  @Dev-next-gen). `drt.assemble` wrote timeline and clip markers as one raw
+  zstd block. The format caps a block at 128 KiB, so past that size the
+  reference decoder rejected the frame, and past 2 MiB assemble threw. The
+  writer now splits the payload into blocks of at most 128 KiB. Output up to
+  128 KiB is byte-identical to before. The same writer also builds the bin
+  registry blob, which gets the same fix.
+
+### Validation
+
+- Each PR was tested with `main` merged in: the full Python suite for #315
+  (only the 4 known worktree path artifacts failed), and the advanced Node
+  suite from a fresh `npm ci` for #313 (1,202 tests, 0 failures).
+- #313's frames checked against the reference `zstd` decoder: rejected above
+  128 KiB before the fix, accepted at every size up to 2.3 MB after it.
+- How Resolve's own importer treats a marker blob over 128 KiB was not
+  measured. The fix makes the frames spec-valid; it is reported, not
+  live-verified.
+
+## What's New in v4.15.1 — Frame captures arrive as images on Python 3.10
+
+### Fixed
+
+- **`timeline_frame` and `timeline_markers get_thumbnail_image` return their
+  image again on Python 3.10** (#314). Both tools are declared `-> Any`. On
+  Python 3.10, FastMCP inferred a `{"result": ...}` output schema from that
+  annotation and then failed to serialize the image, so every capture
+  succeeded in Resolve and reached the client as "Unable to serialize unknown
+  type". Python 3.11 and later infer no schema, which hid the bug from CI and
+  the direct-call unit tests. Both tools now opt out of structured output;
+  their dict results still arrive as JSON text. Reported by @jo-nike.
+
+### Validation
+
+- New `tests/test_image_tool_structured_output.py` calls both tools through
+  `mcp.call_tool`. One case imports the server with Python 3.10's schema
+  inference forced, so it fails without the fix on any Python.
+- Full offline suite and release static checks. No Resolve scripting
+  behaviour changed; live Resolve test not required.
+
+## What's New in v4.15.0 — Conform-session fixes, Python doctor, restart hint
+
+Six gaps a real conform session hit on Resolve Studio 19.1.3.7, each measured
+live with rendered frames; `scripts/doctor.py` now checks the Python the
+server runs on; and a refused scripting connection with the preference already
+Local now says to restart Resolve instead of changing a setting that is
+already correct.
+
+### Fixed
+
+- **`timeline_frame capture` works on projects where rendering a frame fails.**
+  The default `quality="frame"` now exports the viewer's frame with
+  `Project.ExportCurrentFrameAsStill`: seek, read the playhead back by frame,
+  export, read the playhead again, restore it. It switches no page and writes
+  no render settings. On the project that surfaced this, the render route
+  failed every call with "AddRenderJob returned nothing"; the export worked
+  every call (3840×2160 in about 0.2 s). The single-frame render is still
+  there as `quality="render"`, used only when asked for by name. `preview` and
+  `full` now mean the export.
+- **Keyframe actions no longer crash on 19.x.** `timeline_item`
+  `get_keyframes`, `add_keyframe`, `modify_keyframe`, `delete_keyframe` and
+  `set_keyframe_interpolation` died with "'NoneType' object is not callable":
+  a live 19.1 TimelineItem exposes no keyframe methods. They now return
+  `KEYFRAME_API_UNAVAILABLE` with the live version and what to do instead.
+- **Locked tracks are named, not answered with a bare False.**
+  `timeline delete_clips` refuses with `TRACK_LOCKED` listing the locked
+  tracks before calling `DeleteClips`. A failed `media_pool
+  append_to_timeline` names locked target tracks in its error.
+- **Page switches refuse during playback.** A Color-page visit while playback
+  ran, followed by `restore_state`, hung Resolve's main thread, and every
+  later scripting call hung with it. `resolve_control open_page` and
+  `restore_state`, `gallery_stills grab_and_export`, and the page-switching
+  capture routes detect a moving playhead and refuse with `PLAYBACK_ACTIVE`.
+  `allow_during_playback=true` overrides.
+- **A refused connection with scripting already set to Local now says to
+  restart Resolve.** When Resolve was running but refused scripting
+  connections, `SCRIPTING_UNAVAILABLE` always said to set Preferences >
+  General > External scripting = Local, and implied the free edition was the
+  cause. A running Studio can refuse every connection with the preference
+  already Local until it is relaunched. The server now reads
+  `System.Scripting.Mode` from Resolve's `config.dat`, and when it is Local
+  the error leads with "Quit and relaunch DaVinci Resolve", then the existing
+  guidance. When the preference is not Local or cannot be read, the message is
+  unchanged. The error `state` has a new `scripting_preference_local` field
+  (true, false or null). The macOS `config.dat` path was checked on a real
+  Mac; the Windows and Linux paths are untested, and a wrong path reads as
+  unknown, which keeps the old message.
+
+### Added
+
+- **`timeline replace_source_range`: slip a clip to a new source range.**
+  19.x has no slip or trim API. The action rebuilds the item at the same
+  record frame through a temporary track: append the new range there,
+  CopyGrades and carry transform, crop, composite and scaling onto it, delete
+  the original, append the final copy on the original track, copy grade and
+  properties again, remove the temporary copy and track, restore the track
+  lock. Start, end and duration are verified exactly. A length that lands a
+  frame off (mixed source and timeline rates) is corrected and retried. If the
+  final placement fails, the temporary copy stays as the recovery and the
+  error says where. Confirm-token gated, archived first, `dry_run` supported;
+  a locked track needs `unlock_track=true`.
+- **`timeline_item probe_keyframe_override`.** Tells whether a property write
+  reaches the render. On a clip with Inspector keyframes, `SetProperty`
+  returns True and reads back while the render ignores it. The probe exports
+  the frame twice as a null control, nudges the property, exports again,
+  restores the property and compares. Verdict: `override`, `writes_render` or
+  `inconclusive`.
+- **`set_transform` takes `pan_px` / `tilt_px`.** Pan and Tilt scale with the
+  fitted image: Pan moves `Pan × fittedW / timelineW` px. For scale-to-fit the
+  action computes the fitted size from the clip and timeline resolutions and
+  reports the factors it used. Other scaling modes need `fitted_width` /
+  `fitted_height`.
+- **`scripts/doctor.py` checks the interpreter the server runs on.** The checks
+  live in `scripts/doctor_python_env.py`. Each problem is reported as WARN or
+  FAIL with a `Fix:` line (a `fix` key under `--json`) that gives the exact
+  command.
+  - *Python bitness.* A 32-bit Python fails, because Resolve's scripting
+    library is 64-bit only. So does a Python whose architecture the
+    `fusionscript` library was not built for. The library header (ELF, thin
+    or universal Mach-O, PE) is read directly. An Intel Python under Rosetta
+    against an arm64-only library is named as such.
+  - *Python version for Resolve.* Below 3.10 fails. 3.13+ warns unless Resolve
+    answered on this interpreter or the build is 20.3.2 or later. The build is
+    read from the live probe or, on macOS, the app bundle. 3.13+ fails when
+    the scripting module is present but will not import.
+  - *Which Python.* It reads the Claude Desktop and Codex configs. It warns
+    when a config starts the server as a bare `python3`, which a GUI app
+    resolves through a PATH that is not your shell's. It also warns when a
+    config runs a different interpreter from the one doctor checked. It lists
+    every Python on PATH and marks the server's. A venv and its base
+    interpreter count as different Pythons, because they share a binary but
+    not `sys.prefix`. It also states where `fusionscript` loads: external
+    scripting loads it into the server's interpreter, and Resolve's own
+    Scripts menu uses the Python it finds itself.
+  - The fix for a wrong interpreter moves the venv aside before re-running the
+    installer, because `install.py` reuses an existing venv.
+- **The `SCRIPTING_UNAVAILABLE` remediation points at doctor** for the case
+  where Studio is already set to Local and the cause is the server's Python.
+
+### Documentation
+
+- New api_truth entries, carried into `docs/reference/api-limitations.md`:
+  ExportCurrentFrameAsStill as the frame-capture route, the silent
+  keyframe override on SetProperty, DeleteClips on a locked track, Edit
+  transform units (reconciling the "Pan = timeline pixels" rule of thumb,
+  which holds only when the fitted width equals the timeline's), OpenPage
+  during playback, and the missing slip/trim API.
+- `docs/SKILL.md`: capture routes rewritten for the new default; Known Gotchas
+  cover playback, keyframe overrides, locked tracks, transform units and the
+  slip action.
+
+### Validation
+
+- Full Python suite: 4,221 tests, zero failures, 5 skipped. New
+  `tests/test_conform_session_gaps.py` (45 tests), an updated
+  `tests/test_playhead_frame_capture.py`, `tests/test_doctor_python_env.py`
+  (every check against fakes, with a clean 64-bit 3.12 setup as the null
+  control), and `ScriptingPreferenceTests` in `tests/test_resolve_bridge.py`.
+  No advanced-server (Node) code changed.
+- Live: the conform behaviour these fixes encode was measured in the conform
+  session itself. A live pass of the new code paths on a scratch project has
+  not run, because Resolve was in use by that session. The restart hint was
+  checked by reading this Mac's real `config.dat` (Local) and producing the
+  restart message.
+
 ## What's New in v4.14.4 — Compatible dependency updates
 
 Lands #303, #304, #305, #306, and #308. Resolves #307, #309, and #310.
