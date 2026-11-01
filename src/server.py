@@ -11,7 +11,7 @@ Usage:
     python src/server.py --full       # Start the 377-tool granular server instead
 """
 
-VERSION = "4.17.0"
+VERSION = "4.18.1"
 
 import base64
 import os
@@ -52,6 +52,8 @@ from src.utils.resolve211_alignment import auto_align
 from src.utils.resolve211_dctl import native_dctl_result
 from src.utils.resolve211_normalization import normalize_audio
 from src.utils.subtitle_live import set_subtitle_preset as _set_live_subtitle_preset
+from src.utils.subtitle_live import list_captions_live as _list_live_captions
+from src.utils.subtitle_live import write_captions_live as _write_live_captions
 from src.utils.title_library import list_title_presets as _list_installed_title_presets
 from src.utils.title_controls import title_text_targets as _title_text_targets
 from src.utils.title_controls import title_text_keys as _title_text_keys
@@ -13355,7 +13357,9 @@ def _media_analysis_replace_owned_block(existing: Any, body: Any) -> str:
         + re.escape(_MCP_METADATA_BLOCK_END)
     )
     if re.search(pattern, existing_text, flags=re.DOTALL):
-        return re.sub(pattern, block, existing_text, flags=re.DOTALL).strip()
+        # A function replacement inserts the block literally: as a string, a
+        # backslash in the analysis text (a Windows path) is read as an escape.
+        return re.sub(pattern, lambda _match: block, existing_text, flags=re.DOTALL).strip()
     return f"{existing_text}\n\n{block}".strip() if existing_text else block
 
 
@@ -28814,6 +28818,16 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
         inspect rendered frames separately. Successful staging exports are removed;
         failure results report retained staging for diagnosis. Unbundled dry runs need an
         existing preset_reference to avoid live capture. Never patches Project.db.
+      list_captions_live(track?) -> {fps, captions:[{id,text,start,end,words}]}  — decoded
+        from a native DRT export (timeline frames); read-only, Resolve stays open.
+      write_captions_live(track?, replace?, add?, delete?, template_caption_id?, revision_name?, dry_run?)
+        Same caption shape as advanced project_db write_captions, but with Resolve open:
+        replace:[{id,text,start,end,words:[{text,start,end}]}], add:[{text,start,end,words}],
+        delete:[id]. text = words joined by spaces; words must tile the caption.
+        id = the caption start frame as a string (Resolve re-mints item IDs per export).
+        Native export -> caption codec -> native import as a selected revision;
+        Resolve's re-export is decoded and must match text, bounds and word frames.
+        Original retained and re-selected on failure. Never patches Project.db.
       detect_scene_cuts(background?) -> {success | job_id}
       analyze_dolby_vision(clip_ids?, analysis_type?, background?) -> {success | job_id}
       grab_still() -> {success}
@@ -28837,6 +28851,11 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
         # Match the safety decorator's boolean interpretation before any capture/import.
         return _set_live_subtitle_preset(get_resolve(), proj, tl,
                                         {**p, "dry_run": _coerce_bool(p.get("dry_run", p.get("dryRun")))}, _resolve_safe_dir)
+    elif action == "list_captions_live":
+        return _list_live_captions(get_resolve(), tl, p, _resolve_safe_dir)
+    elif action == "write_captions_live":
+        return _write_live_captions(get_resolve(), proj, tl,
+                                    {**p, "dry_run": _coerce_bool(p.get("dry_run", p.get("dryRun")))}, _resolve_safe_dir)
     elif action == "detect_scene_cuts":
         return _run_maybe_background(
             "timeline_ai.detect_scene_cuts", p, lambda: {"success": bool(tl.DetectSceneCuts())}
@@ -28861,7 +28880,7 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     elif action == "grab_all_stills":
         stills = tl.GrabAllStills(p.get("source", 1))
         return {"count": len(stills) if stills else 0}
-    return _unknown(action, ["list_title_presets","create_subtitles","set_subtitle_preset","detect_scene_cuts","analyze_dolby_vision","grab_still","grab_all_stills"])
+    return _unknown(action, ["list_title_presets","create_subtitles","set_subtitle_preset","list_captions_live","write_captions_live","detect_scene_cuts","analyze_dolby_vision","grab_still","grab_all_stills"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

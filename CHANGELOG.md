@@ -2,6 +2,114 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v4.18.1 — Names with `$` or `\` are written as typed
+
+### Fixed
+
+- **`drt assemble_project` no longer rewrites a merged timeline's name when it
+  contains `$`** (#332, thanks @Dev-next-gen). The name was inserted with a
+  replacement string, and JavaScript expands `$&`, `$'` and `$$` in one. A
+  second timeline named `R2 $& $'` wrote an `MpFolder.xml` that no longer
+  parsed, and `Spot $$ 30s` came out as `Spot $ 30s`, so a `folder` move then
+  failed to find the timeline.
+- **The same fix in 53 more places in the offline `.drp`/`.drt` writers.**
+  Caption text in `placeSubtitles`, generator, title and compound clip names,
+  media pool clip names and file paths, and every other value inserted into
+  the XML now goes in with a replacer function, so `$`-sequences stay literal.
+  A new guard test fails the advanced suite if a `replace()` call passes an
+  interpolated template as a string.
+- **The audio-only fallback clone in `cut-media` now XML-escapes the source
+  file name and path.** A source path containing `&`, such as
+  `Smith & Jones/clip.mov`, wrote invalid XML.
+- **Re-running media analysis on a clip no longer fails when the new analysis
+  text contains a backslash.** The managed block in the clip's metadata was
+  replaced with `re.sub` using the text as a replacement string, so a Windows
+  path raised `bad escape \F` and `\t` turned into a tab. The text is now
+  inserted as-is.
+
+### Validation
+
+- Advanced Node suite on Node 20 with a fresh `npm ci`: 1,224 tests, 0 failed.
+  With the fixes reverted, the guard and the caption, generator and title tests
+  fail.
+- Python suite: the new metadata test fails with `bad escape \F` without the
+  fix and passes with it.
+- Offline file writers only. No Resolve API behaviour changed.
+
+## What's New in v4.18.0 — Edit captions with Resolve open
+
+### Added
+
+- **`timeline_ai.list_captions_live` and `timeline_ai.write_captions_live`**
+  (#330, thanks @sidevconcept). Caption text and per-word timing can now be
+  edited without quitting Resolve or patching the open Project.db.
+  `write_captions_live` takes the same `replace` / `add` / `delete` shape as
+  the offline `project_db` `write_captions`. It exports the timeline as a
+  native DRT, applies the edit with the same caption codec and edit checks,
+  and imports the result as a new timeline revision. The revision is selected
+  only after Resolve's own re-export of it keeps the requested text, caption
+  bounds and word frames. If any step fails, the original timeline stays
+  selected and unchanged.
+- A caption `id` is its start frame as a string, because Resolve issues new
+  item IDs on every export. The write returns the IDs to use for the next
+  edit, including for captions it added or moved. Edits on a track where two
+  captions share a start frame are refused as ambiguous.
+- `write_captions_live` is registered as a destructive action with a native
+  dry run (medium risk, recoverable). `list_captions_live` is read-only.
+
+### Changed
+
+- `set_subtitle_preset` now shares its export → edit → import → re-export
+  steps with the caption writer. Its behaviour and result fields are the same.
+
+### Limits
+
+- Word times keep the existing codec's 60 Hz tick quantisation.
+- Adding to an empty subtitle track needs an existing caption as a template.
+  Per-caption Fusion compositions are refused.
+- The structural readback does not check every grade, marker, Fusion
+  composition or audio property carried through the native timeline import.
+
+### Validation
+
+- Python suite with the PR merged on `main`: 4,294 tests. The only failures
+  are the 4 `source_media_guard` path checks that always fail in a scratch
+  worktree.
+- Advanced Node suite on Node 20 with a fresh `npm ci`: 1,218 tests, 1,157
+  passed, 0 failed, 61 skipped.
+- Live-validated by the contributor on Studio 21.1.0.17 with a disposable
+  project copy: three captions rewritten (one containing `$`), a moved
+  caption's ID reused, an added caption deleted by its returned ID, and a
+  burned-in render checked across nine word phases. Not live-validated on the
+  maintainer's Studio 19.1.3.7.
+
+## What's New in v4.17.1 — Media analysis decodes each file once
+
+### Changed
+
+- **The readthrough pass of media analysis runs ffmpeg once instead of four
+  times** (#329, thanks @Dev-next-gen). Loudness, scene scoring, black frames
+  and silence each used to be a separate ffmpeg run, and each run decoded the
+  whole file: `-af` alone does not drop the video stream from a null output,
+  so the audio passes decoded every video frame too. The four filters now
+  share one run through `split`/`asplit`. On a 1080p H.264 file the
+  readthrough took 8.1 s instead of 22.1 s, and CPU time fell from 84.8 s to
+  30.5 s; ProRes and HEVC dropped by about the same share. The results are
+  the same as before. The parsers are unchanged.
+- The four measurements now share one exit code and one timeout. The single
+  run gets four times the old per-pass timeout, the budget of the four runs it
+  replaces. If that run times out, all four report `success: false`, where
+  before the other three could still succeed.
+
+### Validation
+
+- Python suite with the PR merged on `main`: 4,291 tests. The only failures
+  are the 4 `source_media_guard` path checks that always fail in a scratch
+  worktree. The new test compares the single run against the four separate
+  runs with the real ffmpeg on an A/V file, a video-only file and an
+  audio-only file.
+- No Resolve behaviour changed; this is ffmpeg only.
+
 ## What's New in v4.17.0 — Power windows for Resolve 21
 
 ### Added
