@@ -1758,18 +1758,165 @@ API_TRUTH: List[Dict[str, Any]] = [
                    "The language selection via resolve.AUTO_CAPTION_LANGUAGE_* "
                    "is the only customization; the engine itself cannot be "
                    "changed. There is no dedicated subtitle import method. "
-                   "However, MediaPool.ImportMedia(srt) + AppendToTimeline was "
-                   "reported working on Studio 21.0.4.5 (issue #169). Whether "
-                   "that route carries word timing for animated presets on "
-                   "21.1 has not been verified; SRT contains only cue timing.",
+                   "MediaPool.ImportMedia(srt) + AppendToTimeline was reported "
+                   "working on Studio 21.0.4.5 (issue #169). On Studio 21.1.2.10 "
+                   "the clipInfo form of that append aborts Resolve and the plain "
+                   "form places nothing (issue #335). Whether either route carries "
+                   "word timing for animated presets has not been verified; SRT "
+                   "contains only cue timing.",
         "recommended": "Use Resolve's engine for CreateSubtitlesFromAudio. "
-                       "For external SRT, test ImportMedia + AppendToTimeline "
-                       "on the exact installed build or import through the UI. "
+                       "For external SRT on 21.1.2, import through the UI. "
+                       "clipInfo append of a subtitle item is refused on 21.1+ "
+                       "(see MediaPool.AppendToTimeline subtitle clipInfo). "
                        "Use project_db write_captions for explicit word timings "
                        "with Resolve fully quit; do not assume SRT supplies them.",
         "tags": ["missing-method", "subtitle", "transcription",
                  "speech-recognition", "asr"],
         "submit": "missing",
+    },
+    {
+        "symbol": "MediaPool.AppendToTimeline (subtitle clipInfo)",
+        "object": "MediaPool",
+        "signature": "([{clipInfo}]) -> [TimelineItem]",
+        "reality": "On Studio 21.1.2.10 (Windows), AppendToTimeline with a "
+                   "clipInfo dict for an imported SRT MediaPoolItem (Type "
+                   "Subtitle) aborts Resolve: assertion at Sm2MpObject.cpp:546, "
+                   "reproduced 2/2. The call hangs, then the process is gone. "
+                   "The plain list form AppendToTimeline([item]) does not crash "
+                   "and places nothing. ImportMedia(srt) + AppendToTimeline was "
+                   "reported working on Studio 21.0.4.5 (issue #169). Which "
+                   "clipInfo field triggers the abort was not isolated. Builds "
+                   "21.1.0 and 21.1.1 were not measured.",
+        "recommended": "media_pool append_to_timeline, the granular "
+                       "append_to_timeline, and the other clipInfo builders "
+                       "refuse a Type=Subtitle item on Resolve 21.1 and above, "
+                       "and when the connected version cannot be read, with "
+                       "SUBTITLE_APPEND_CRASH, before AppendToTimeline is called. "
+                       "On a build older than 21.1 the call is still forwarded. "
+                       "Import the SRT through the UI on 21.1.2.",
+        "tags": ["crash", "subtitle", "timeline", "silent-failure"],
+        "submit": "bug",
+        "issue": 335,
+        "mitigation": ["subtitle_append_guard"],
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
+    },
+    {
+        "symbol": "Timeline.DeleteGaps",
+        "object": "Timeline",
+        "signature": "() -> bool",
+        "reality": "On Studio 21.1.2.10 (Windows), DeleteGaps() returned True "
+                   "and left every clip start unchanged, with gaps at 0/200 and "
+                   "again at 0/200/400. This server does not call DeleteGaps. "
+                   "Not re-measured here.",
+        "recommended": "Read the clip starts before and after. Treat equal "
+                       "readings as failure even when the call returned True. "
+                       "Close the gaps in the Edit page until a build shows "
+                       "the starts actually move.",
+        "tags": ["silent-failure", "timeline", "edit"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
+    },
+    {
+        "symbol": "MediaPool.AddToPhotoAlbum",
+        "object": "MediaPool",
+        "signature": "(clips) -> [MediaPoolItem]",
+        "reality": "On Studio 21.1.2.10 (Windows), AddToPhotoAlbum returned [] "
+                   "and the album's GetPhotoList() stayed empty, including "
+                   "after SetCurrentPhotoAlbum. CreatePhotoAlbumFromPhotos "
+                   "placed photos in the same session. On Studio 19.1.3.7 "
+                   "(2026-11-01, dir() of the open project's MediaPool), "
+                   "AddToPhotoAlbum, CreateEmptyPhotoAlbum, "
+                   "CreatePhotoAlbumFromPhotos, and GetCurrentPhotoAlbum are "
+                   "absent.",
+        "recommended": "On 21.1.2, count the album's photos before and after "
+                       "and treat an unchanged count as failure. On 19.1.3.7 "
+                       "the methods are not there; do not call them.",
+        "tags": ["silent-failure", "media-pool", "missing-method"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "dir() on Studio 19.1.3.7; the empty-list result is reported on 21.1.2.10 and was not re-measured here",
+    },
+    {
+        "symbol": "Timeline.ExportFrame",
+        "object": "Timeline",
+        "signature": "(frameOffset, settings) -> dict",
+        "reality": "On Studio 21.1.2.10 (Windows), Timeline.ExportFrame returned "
+                   "{'success': False, 'error': 'frameOffset is out of range "
+                   "for the timeline'} for offsets 0, 5, 100, 200, 216000, and "
+                   "216010. The same frames exported through "
+                   "TimelineItem.ExportFrame. The timeline reported "
+                   "StartTimecode 01:00:00:00, StartFrame 86400, and EndFrame "
+                   "86400. Not re-measured here; this machine had no current "
+                   "timeline to dir().",
+        "recommended": "Export through TimelineItem.ExportFrame. If "
+                       "GetStartFrame() and GetEndFrame() are equal, the "
+                       "timeline export has no frame range to address.",
+        "tags": ["silent-failure", "timeline", "export"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
+    },
+    {
+        "symbol": "TimelineItem.SetPosition / Timeline.MoveItems",
+        "object": "TimelineItem / Timeline",
+        "signature": "SetPosition(...) -> bool; MoveItems(...) -> bool",
+        "reality": "On Studio 21.1.2.10 (Windows), TimelineItem.SetPosition "
+                   "and Timeline.MoveItems returned False for video clips and "
+                   "stills, for int and float start frames, for a no-op "
+                   "startFrame equal to the clip's current frame, for both "
+                   "moveLinkedItems values, and with or without "
+                   "subframePrecision. Timeline.SetCurrentTimecode succeeded "
+                   "in the same session. This server does not call either "
+                   "method. Not re-measured here.",
+        "recommended": "Do not treat False from these two as a bad argument. "
+                       "On 21.1.2.10 they returned False for every input tried. "
+                       "Move the clip in the Edit page.",
+        "tags": ["unreliable-return", "timeline", "edit"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
+    },
+    {
+        "symbol": "TimelineItem.SetLeftOffset",
+        "object": "TimelineItem",
+        "signature": "(offset, ...) -> bool",
+        "reality": "On Studio 21.1.2.10 (Windows), SetLeftOffset(5.0, False, "
+                   "True) on a clip at frame 400 with duration 120 returned "
+                   "True, moved the start to about -86000, and grew the "
+                   "duration to about 86515. Setting the offset back to 0 "
+                   "left the clip at about -86000. The call extends the clip "
+                   "from source media. It does not nudge the edit point, and "
+                   "the edit does not come back. A live gap probe on an older "
+                   "build recorded SetLeftOffset as absent. This server only "
+                   "reads GetLeftOffset. Not re-measured here.",
+        "recommended": "Do not call SetLeftOffset to trim a handle. There is "
+                       "no API undo. Any future wrapper has to say that the "
+                       "call extends from source media and require an explicit "
+                       "confirm before it runs.",
+        "tags": ["silent-failure", "timeline", "edit", "destructive"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
+    },
+    {
+        "symbol": "Timeline.AddMarker at relative frame 0",
+        "object": "Timeline",
+        "signature": "(frameId, color, name, note, duration, customData) -> bool",
+        "reality": "On Studio 21.1.2.10 (Windows), with StartFrame 86400, "
+                   "AddMarker(0) returned False and AddMarker(86400) returned "
+                   "False. AddMarker(200) returned True. Other clips accepted "
+                   "their relative GetStart(). Related to issue #34. This "
+                   "server already reports success false when AddMarker "
+                   "returns false. Not re-measured here.",
+        "recommended": "Place the marker at a relative frame other than 0 "
+                       "when frame 0 is refused. Do not retry the same call "
+                       "with StartFrame added: that also returned False on "
+                       "21.1.2.10.",
+        "tags": ["unreliable-return", "timeline", "marker"],
+        "submit": "bug",
+        "issue": 336,
+        "verified_on": "Reported on DaVinci Resolve Studio 21.1.2.10 (Windows); not re-measured here",
     },
     {
         "symbol": "Media Pool folder rename",
