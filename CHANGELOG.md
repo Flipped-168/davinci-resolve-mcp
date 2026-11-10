@@ -2,6 +2,59 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.0.3 — The control panel no longer builds AppleScript from a folder name
+
+### Security
+
+- **The panel's folder picker passed its start folder into AppleScript source.** On macOS, the picker put the request's `initial` folder inside a string literal in the script it ran with `osascript`, checked only for being an existing directory. A folder whose name contained `"` could close the literal and run AppleScript of its own, such as `do shell script`. The script is now fixed text that reads the folder as a run-handler argument, and the folder is made absolute first. The endpoint sits behind the panel's token and Host/Origin gate and answers loopback clients only, so a caller needed a valid panel session on the same machine and a folder with that name to exist.
+- **The panel's Claude Code terminal launcher, same shape.** It put its `cd <repo> && <claude>` command inside an AppleScript string. The iTerm branch did no escaping, and the Terminal branch escaped by hand. Neither value comes from the request, but both branches now pass the command as an argument the same way.
+
+### Not changed
+
+- Covered by unit tests with a mutation check: restoring the old code fails all five new tests. One live measurement on macOS: `osascript -e 'on run argv' … -- <path>` delivers the path as the only argument, with quotes, backslashes and a leading `-` intact. The picker and the launcher themselves were not opened.
+
+## What's New in v5.0.2 — A caller path that starts with "-" is no longer handed to a program as an option
+
+Closes the gap the v5.0.0 notes left open under **Not changed**, reported with a reachability check in #350.
+
+### Security
+
+- **Option-like paths are refused before a program is spawned (#350).** A caller path that is the bare operand of ffprobe, ffmpeg or whisper and starts with `-` was read as an option: ffprobe given a file named `-report` writes a log into its working folder before it notices there is no input. The Python server now refuses it with `OPTION_LIKE_PATH_REFUSED`, the same code the advanced server's `assertNotOption` returns. An absolute path, or one prefixed with `./`, still works. Guarded sites:
+  - the proxy compatibility check, on its own or in `link_proxy` (`_probe_media_file`), and the render and quick-export readbacks (`_ffprobe_media_summary`)
+  - `media_pool_item extract_frames`, for its `output_dir`
+  - media analysis's ffprobe pass, and the whisper CLI's input path
+  - `mix_plan`'s stem probes and its premix `output_path`
+  - `assess_grade` / `grade_loop`'s colour-transfer probe, which reports the transfer as unknown instead of spawning
+
+  The four sites named in v5.0.0 were joined by four more, found by sweeping every spawn under `src/` for a caller path in a positional slot.
+
+### Fixed
+
+- **`edit_engine sound_density_audit` with `duration_seconds`.** The duration limit was inserted between `-i` and the media path, so `-t` became ffmpeg's input and the caller's path a bare output filename. Every call that set `duration_seconds` failed. The limit now goes before `-i`.
+
+### Not changed
+
+- Covered by unit tests with mutation checks: each guard, reverted, fails its own test. Nothing was run against a live ffprobe, ffmpeg, whisper or Resolve.
+
+## What's New in v5.0.1 — Three more Resolve calls reported as broken in #336 are withdrawn
+
+A ledger correction. No tool behavior changed.
+
+### Fixed
+
+- **`TimelineItem.SetPosition` and `Timeline.MoveItems` are no longer recorded as broken (#336).** The reporter re-ran them on Studio 21.2.0.6 (Windows), on a timeline whose clips sit inside its own range. Both returned True and the clip moved. The entry keeps the earlier 21.1.2.10 reading (False for 0, 100, and -50) and says that no reported input on that build was at or after the timeline's start frame, so that build's answer to one is not known.
+- **`TimelineItem.AddMarker` at relative frame 0 is no longer recorded as a silent failure (#336).** On 21.2.0.6 the marker was written and read back from `TimelineItem.GetMarkers()`. The earlier run read `Timeline.GetMarkers()`. The entry records both readbacks.
+- **`TimelineItem.SetLeftOffset` is no longer recorded as destructive (#336).** It moves the clip's start and changes its source range, and it returned True for a start below the timeline's `StartFrame`. The runaway extension in the first report came from a clip outside the timeline's range and did not reproduce.
+- **`MediaPool.AddToPhotoAlbum` stands**, with the 21.2.0.6 reading added: `None`, and the album stays empty.
+
+### Documentation
+
+- `docs/reference/api-limitations.md` is regenerated. The Blackmagic report goes from 66 to 63 bugs.
+
+### Not changed
+
+- Every reading in these entries is the reporter's. Nothing was re-measured against a live Resolve for this release. Withdrawn entries stay in `lookup_api_truth`, marked `WITHDRAWN`, so the correction is findable.
+
 ## What's New in v5.0.0 — A tool call can no longer run a command or choose the program the server spawns
 
 **A breaking security release.** It fixes two reports made through GitHub's private vulnerability reporting: [GHSA-x2fm-g3cm-6x5w](https://github.com/samuelgursky/davinci-resolve-mcp/security/advisories/GHSA-x2fm-g3cm-6x5w), reported by Artur Chlebicki (@Artur12555), and [GHSA-h2fm-rcfg-jch9](https://github.com/samuelgursky/davinci-resolve-mcp/security/advisories/GHSA-h2fm-rcfg-jch9), reported by @3099404236. Thank you both.
