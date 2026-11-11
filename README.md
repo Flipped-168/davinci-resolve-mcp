@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-[![Version](https://img.shields.io/badge/version-5.0.3-blue.svg)](https://github.com/samuelgursky/davinci-resolve-mcp/releases)
+[![Version](https://img.shields.io/badge/version-5.2.0-blue.svg)](https://github.com/samuelgursky/davinci-resolve-mcp/releases)
 [![npm](https://img.shields.io/npm/v/davinci-resolve-mcp.svg?label=npm&color=CB3837)](https://www.npmjs.com/package/davinci-resolve-mcp)
 [![API Coverage](https://img.shields.io/badge/API%20Coverage-100%25-brightgreen.svg)](docs/reference/api-coverage.md)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-37%20(390%20full)-blue.svg)](#server-modes)
@@ -216,6 +216,11 @@ It is currently in **closed beta** — you can request access at
 The open-source servers are complete and fully functional on their own.
 
 ## What You Can Do
+
+For scoring to picture, the [Resolve / Live film workflow](docs/guides/film-workflow.md)
+adds picture/cue baselines, change reports, verified new-track stem return and
+evidence-based handoff preflight. It preserves source media and reports missing
+calibration or delivery evidence explicitly.
 
 ```text
 "List all projects and open the one called 'My Film'"

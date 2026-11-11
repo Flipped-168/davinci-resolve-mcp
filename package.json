@@ -1,6 +1,6 @@
 {
   "name": "davinci-resolve-mcp",
-  "version": "5.0.3",
+  "version": "5.2.0",
   "description": "NPM bootstrapper for the DaVinci Resolve MCP Server.",
   "license": "MIT",
   "author": "Samuel Gursky <samgursky@gmail.com>",
@@ -44,6 +44,7 @@
     "resolve-advanced/README.md",
     "docs/**/*.md",
     "docs/reference/resolve_scripting_api.txt",
+    "docs/reference/DaVinciResolveScript.pyi",
     "examples/**/*.md",
     "scripts/**/*.py",
     "scripts/edit_subtitle_timeline.mjs",

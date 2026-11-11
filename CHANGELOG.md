@@ -2,6 +2,105 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.2.0 — Film scoring handoff and stem return
+
+From #358 by @veridian69. A read-mostly workflow for handing picture to a composer and checking what comes back. Guides: `docs/guides/film-workflow.md`, `docs/guides/film-cues.md`, `docs/guides/film-picture-changes.md`.
+
+### Added
+
+- **Cue sheets.** `timeline_markers(action="export_cue_sheet")` returns read-only `film-cues/v1` cues with relative integer frames, a rational frame rate, seconds and production metadata. `compare_cue_sheets` diffs two cue documents offline.
+- **Picture baseline.** `timeline(action="film_snapshot")` captures a read-only structural snapshot and picture fingerprint. Given before and after snapshots, `compare_cue_sheets` reports the cues that overlap changed video.
+- **Stem return.** `timeline(action="film_stems_return")` previews by default. With `preview=false`, plus the `timeline_id` and `fingerprint` from the preview, it verifies a `film-stems/v1` package (PCM 24-bit WAV headers, sample counts, SHA-256) and imports each stem onto a new audio track, checking every placement against the timeline. A stale preview refuses. Existing tracks are never replaced and nothing is rolled back automatically.
+- **Preflight.** `timeline(action="film_preflight")` combines picture, media, stem, tempo, calibration and loudness checks, and reports missing evidence as unknown rather than passed.
+
+### Fixed on landing
+
+- **Stems imported earlier went undetected on macOS.** Existing stems are now matched by resolved path, so a delivery folder under `/tmp`, `/var` or another symlink is recognised and a second import is refused.
+- **Stem return had no risk rating.** The preview is a low-risk read and archives nothing. The apply call is rated medium risk on the timeline and archives the timeline first, like other timeline edits.
+- **Archiving left the Archive bin current.** The archive taken before every destructive edit now puts the previous media pool bin back, so media imported by the edit that follows no longer lands in Archive.
+
+### Not verified
+
+- The live film validation scripts (`tests/live_film_*_validation.py`) were not run against Resolve. Everything above is covered by unit tests against fakes.
+
+## What's New in v5.1.0 — API search reads the installed Resolve's own stub
+
+Completes #351, from #356 by @CaptRauti. v5.0.6 put the typed stub back in the npm package; this release stops it answering for builds newer than itself.
+
+### Added
+
+- **`source` on `search_api`, `describe_api` and `api_surface`** (and the granular `search_resolve_api`, `describe_resolve_api`, `get_resolve_api_surface`). `auto`, the default, reads the `DaVinciResolveScript.pyi` that Resolve installs next to its scripting API and falls back to the copy shipped in `docs/reference`. `shipped` always reads the shipped copy. `installed` refuses rather than falling back. `RESOLVE_SCRIPT_API` still overrides the platform default location.
+- **Every reply says which stub answered**: `stub` (the absolute path) and `stub_source` (`installed` or `shipped`). A "symbol not found" error now names the stub that answered and suggests `source='installed'`.
+
+### Changed
+
+- **Results can now differ between machines.** On a Resolve that installs a newer stub, the default answers from that build. The contributor measured Studio 21.2.0.6 on Windows: 530 methods against the shipped 410, including `ExportThumbnails`, the AutoColor calls and `GetCDL`/`SetCDL`, which the shipped copy reports as absent. Pass `source='shipped'` for the pinned 21.1 inventory.
+
+### Not changed
+
+- The shipped stub is still the 21.1 revision, and the 21.1 inventory tests now pin `source='shipped'`. On this machine (Resolve Studio 19.1.3.7, which installs no stub) `auto` falls back to the shipped copy; the installed path was measured by the contributor on 21.2.0.6 only. No Resolve API is called, so no live Resolve run.
+
+## What's New in v5.0.8 — A bridge test no longer fails when the repository and the temp folder are on different drives
+
+Fixes the second half of #352, from #357 by @0x-70da.
+
+### Fixed
+
+- **`test_a_filesystem_root_media_root_contains_its_files` depended on the drive of the current folder.** The test took its allowed root from `os.path.abspath(os.sep)`, which on Windows is the root of the current working directory's drive. Its fixture comes from `tempfile.mkdtemp()`. With the repository on `E:\` and `%TEMP%` on `C:\`, the server correctly rejected the fixture as outside the root and the test failed. The root now comes from the fixture itself (`Path(self.ROOT).anchor`).
+
+### Not changed
+
+- Test-only change; no server behavior changed, so no live Resolve run. The contributor confirmed the failure and the fix on the affected Windows setup.
+
+## What's New in v5.0.7 — No logging error on Windows consoles with a legacy code page
+
+Fixes the first half of #352, from #355 by @CaptRauti.
+
+### Fixed
+
+- **The timeline brain migration message could not be encoded on some Windows consoles.** It contained `→` (U+2192), which code page 1256 cannot encode, so a log handler on such a stream printed a `--- Logging error ---` traceback once per migration step instead of the message. The message now uses `->`. A new test fails if a logger call in that module uses a character cp1256 cannot encode.
+
+### Not changed
+
+- The second half of #352 (a `resolve_bridge` test that fails when the repository and `%TEMP%` are on different drives) is a test portability issue and is not in this release. No Resolve behavior changed, so no live Resolve run.
+
+## What's New in v5.0.6 — `search_api`, `describe_api` and `api_surface` work on npm installs again
+
+Fixes #351, from #354 by @CaptRauti.
+
+### Fixed
+
+- **The typed API stub was missing from the npm package.** `package.json` `files` listed the markdown docs and the `.txt` scripting reference, but nothing matched `docs/reference/DaVinciResolveScript.pyi`. A source checkout had the stub and every npm install (including `npx davinci-resolve-mcp sync`) did not, so all three stub-backed `resolve_control` actions failed with `TYPED_API_QUERY`. The stub is now named in `files`.
+- A new drift test fails when the `files` list stops covering the stub, or when the stub is missing from the checkout.
+
+### Not changed
+
+- The shipped stub is still the Resolve 21.1 revision. On a 21.2 install, `search_api` does not yet know the methods 21.2 added (for example `ExportThumbnails`, `GetCDL`). No Resolve behavior changed, so no live Resolve run; `npm pack --dry-run` lists the stub.
+
+## What's New in v5.0.5 — fast-xml-parser 5.12.0
+
+From #347 (Dependabot).
+
+### Dependencies
+
+- **`fast-xml-parser` 5.11.2 → 5.12.0** in the root package and in `resolve-advanced`. A minor release: a faster fallback for stop nodes, metadata offsets kept for CRLF input, and a CommonJS typing fix.
+
+### Not changed
+
+- No server behavior changed. The Node advanced suite passed on a fresh `npm ci`, and the Python suite passed.
+
+## What's New in v5.0.4 — Media analysis finds FFmpeg installed through WinGet on Windows
+
+Fixes #346, from #349 by @jsdhwfmax.
+
+### Fixed
+
+- **FFmpeg installed through WinGet could be invisible on Windows.** A GUI client (OpenCode in the report) may start the server with a PATH that lacks WinGet's FFmpeg links, so `media_analysis` reported `ffmpeg` and `ffprobe` as unavailable while both worked in a terminal. On Windows the server now looks for the per-user `Gyan.FFmpeg` package under `%LOCALAPPDATA%\Microsoft\WinGet\Packages` and appends its `bin` folder to its own PATH when both executables are there. It is appended last, so a tool already on PATH keeps priority, and a folder already present under another spelling is not added twice.
+
+### Not changed
+
+- macOS and Linux are untouched; the lookup only runs on Windows. Validated by the contributor's Windows run and by @0x-70da on Windows 10 with a real WinGet FFmpeg 9.0.2 install with the WinGet entry removed from PATH; @CaptRauti confirmed the directory layout on a current install. The offline suite passed here on macOS. No Resolve behavior changed, so no live Resolve run.
+
 ## What's New in v5.0.3 — The control panel no longer builds AppleScript from a folder name
 
 ### Security
