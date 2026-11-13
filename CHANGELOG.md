@@ -2,6 +2,75 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.2.7 — Preset and media rows live-tested with fixtures
+
+From #363 by @Ghoul0718. No server behaviour changes.
+
+### Added
+
+- **`tests/live_preset_fixture_validation.py`**, a live harness for the API coverage rows marked "needs fixture". It builds what each call needs from synthetic ffmpeg media, runs relink and sync in a disposable project that it deletes afterwards, restores the open project, and sweeps every `ZZ_r2104_` preset so each preset list ends as it started. Presets that existed before the run are never deleted. No scripting call creates a burn-in preset, so `--burnin-wait N` waits while a person saves one in Workspace > Data Burn-In.
+
+### Changed
+
+- **API coverage:** `SaveLayoutPreset`, `ImportRenderPreset`, `ExportRenderPreset`, `ImportBurnInPreset`, `ExportBurnInPreset` and `DeleteBurnInPreset` (Resolve), and `RelinkClips` and `AutoSyncAudio` (MediaPool) move from ⚠️ to ✅. Totals do not change, since both marks count as live-tested. The rows record that preset exports write `<name>.xml` inside a folder (v5.2.6) and that `AutoSyncAudio` over the bridge needs v5.2.5.
+
+### Not verified here
+
+- The live results are the contributor's, from free 21.0.4.5 on macOS, with the burn-in round trip on a preset saved by hand. This machine runs Studio 19.1.3.7 and did not rerun the harness.
+
+## What's New in v5.2.6 — Preset exports report the file Resolve writes
+
+From #362 by @Ghoul0718.
+
+### Fixed
+
+- **Render and burn-in preset exports named the wrong file.** `ExportRenderPreset(presetName, exportPath)` and `ExportBurnInPreset` treat `exportPath` as a folder: Resolve creates it and writes `<presetName>.xml` inside, so a path ending in `.xml` becomes a folder of that name (measured on free 21.0.4.5, macOS). The tools echoed the path back as if it were the file, and the import tools could not read it. `export_render_preset` and `export_burn_in_preset` now return `export_file`, and `render_presets` `export_render` / `export_burnin` return `file`: the `.xml` to give the matching import. A failed export returns no file. The `projectlevel.export_burn_in_preset` probe checks the written `.xml` instead of the folder.
+- On landing, the helper was made to check what is on disk: if a build writes the exact path it is given, that path is reported instead. Only the folder behaviour has been measured.
+
+### Not verified here
+
+- The folder behaviour is the contributor's measurement on free 21.0.4.5. This machine runs Studio 19.1.3.7 and did not measure it. `ExportLayoutPreset` and `ExportUserPreferencesPreset` wrote the exact file on the same build and are unchanged.
+
+## What's New in v5.2.5 — The bridge keeps number keys in settings dicts
+
+From #361 by @Ghoul0718.
+
+### Fixed
+
+- **Over the in-app bridge, settings dicts keyed by Resolve's constants reached Resolve with string keys.** The constants are numbers (`resolve.AUDIO_SYNC_MODE` is a float on 21.0.4.5), and JSON object keys are always strings, so `{AUDIO_SYNC_MODE: AUDIO_SYNC_WAVEFORM}` arrived keyed by `"1.0"`. Resolve ignores keys it does not know: `MediaPool.AutoSyncAudio` returned False and linked nothing. The client now sends a dict whose keys are not all strings as key-value pairs, and the bridge rebuilds it with the original keys. Dicts with only string keys go on the wire unchanged. `CreateSubtitlesFromAudio` and the cloud project calls take the same kind of dict.
+
+### Upgrading
+
+- The bridge inside Resolve is a copy made at install time. Reinstall it (or reinstall, then call the bridge's `reload`) for this fix to take effect. An older bridge given the new encoding passes the dict through unchanged, so those calls behave as before rather than worse.
+
+### Verified
+
+- The contributor's live run on free 21.0.4.5 (macOS): `AutoSyncAudio` returned False with an empty `Synced Audio` on the previous release and True with the audio linked on this one. Not rerun on this machine.
+
+## What's New in v5.2.4 — The round-trip probe leaves the current timeline alone
+
+From #364 by @Wintch.
+
+### Fixed
+
+- **`timeline` `probe_interchange_roundtrip` changed which timeline was current.** Resolve makes an imported timeline current, and deleting it leaves Resolve to pick another one, in practice the last in the list. The probe never switched back, so a later call on "the current timeline" could edit a different timeline. The bug was invisible whenever the starting timeline was already last. The probe now makes the starting timeline current again after cleanup, after a failed import, and with `cleanup_imported: false`, and confirms the switch by reading it back, as #344 did for other timeline switches. A new `current_timeline` field reports `restored`, with an error and the readback when the switch did not take.
+
+### Not verified here
+
+- Unit-tested with a fake project that behaves as the report describes. Not run against Resolve on this machine.
+
+## What's New in v5.2.3 — SetPosition and MoveItems take a position dict
+
+From the re-measurement in #336 by @CaptRauti. No server behaviour changes.
+
+### Changed
+
+- **API truth ledger: `TimelineItem.SetPosition` / `Timeline.MoveItems`.** Both take a position dict, `{startFrame[, trackType, trackIndex]}`, not a bare frame number. On Studio 21.2.0.6 (Windows), `SetPosition({'startFrame': 86800})` returned True and moved the clip, while 100 and −50, below the timeline's `StartFrame`, returned False and left it in place. `trackType` and `trackIndex` are optional, and a float `startFrame` snapped to the whole frame. The bare-int form `SetPosition(86800)` returned False for every input, which reads exactly like a broken method; the entry now says so and recommends the dict.
+
+### Not verified here
+
+- The readings are the reporter's. This server calls neither method, and nothing was re-measured on this machine. Whether 21.1.2.10 accepts a correct in-range call is still not known.
+
 ## What's New in v5.2.2 — Long words in captions are no longer cut off
 
 From #360 by @goranai.
