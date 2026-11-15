@@ -2,6 +2,57 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.2.11 — A typo'd track index no longer grows a new timeline
+
+From a follow-up on #370 by @willturner-maker.
+
+### Fixed
+
+- **`create_timeline_from_clips` built as many tracks as a row named.** Since v5.2.9 it adds the tracks its `clip_infos` rows name, so a typo such as `track_index: 99` created a timeline with 98 empty tracks and answered success. A new timeline now gets at most 32 tracks of each type for its rows. A higher index is refused with `INVALID_TRACK_INDEX` before anything is created, and the message names the route for a build that needs more: create the timeline, add tracks with `timeline` `add_track`, then `append_to_timeline`, which checks rows against the tracks that exist. Same in the granular server. Both servers' docstrings now list `track_index` and `media_type` for this form.
+
+### Not verified here
+
+- Offline tests only; no live Resolve run was made for this release.
+
+## What's New in v5.2.10 — Three writes are read back before they report success
+
+From #373 by @youchengyangdu-pixel, adapted on landing.
+
+### Fixed
+
+- **`timeline_markers.set_current_timecode` trusted the native `True`.** It now reads the playhead back, compared by frame and retried, and returns `requested`, `target`, `before`, `actual`, `api_success` and `verified`. A `True` that left the playhead elsewhere is `TIMECODE_READBACK_MISMATCH`. The shared seek check also accepts a read-back naming the same timecode label, so a drop-frame `;` or an unpadded hour no longer fails a seek that landed.
+- **`media_pool.create_timeline_from_clips` (`clip_ids`) trusted the returned timeline.** It now confirms the timeline is in the project, holds items, and carries every ordinary clip's media-pool ID; a miss is `CREATE_TIMELINE_READBACK_FAILED`, with a note that the timeline may already exist. Subtitle and generator sources have no media-pool item on the timeline, so they are checked by SRT cue text and by name and bounds. Those two checks rest on behaviour not yet measured live, so a miss there is reported as `verified: false` with a warning on a successful result. A source SRT that is not UTF-8 falls back to the timeline's own cues.
+- **Live subtitle preset and caption revisions** now check, after the write, that Resolve still has the same project, a database attached, the revision selected and readable target subtitle items. A failure reports `RESOLVE_DATABASE_UNHEALTHY` and asks for a manual restart; nothing is repaired automatically.
+
+### Changed on landing
+
+- String comparison of timecodes replaced by the frame and label check above; the unmeasured subtitle and generator checks no longer fail the call; an unreadable SRT no longer fails the call; the clip IDs are resolved once instead of twice.
+
+### Not verified here
+
+- Offline tests only; no live Resolve run was made for this release. The subtitle cue-text and generator `Type` assumptions and the database-health gate over the free-edition bridge are unmeasured.
+
+## What's New in v5.2.9 — Bad track indexes and misplaced arguments are refused, not dropped
+
+From #370 and #372 by @willturner-maker, plus a Traditional Chinese README from #369 by @monarchsofchaos004-gif.
+
+### Fixed
+
+- **A `clip_infos` `track_index` that names no track landed on track 1 (#370).** Resolve places a clipInfo whose `trackIndex` is 0, past the track count, or not an int (`"2"`) on track 1 and returns the new items, so the read-back reported the wrong-track placement as verified. Rows are now checked before anything reaches `AppendToTimeline`, in both servers. `track_index` must be a 1-based integer; a digit string is coerced. It must name an existing track of the row's `media_type`, or either type when none is set. `media_type` must be 1 or 2. Refusals carry `INVALID_TRACK_INDEX`, `TRACK_INDEX_OUT_OF_RANGE` (with the timeline's track counts) or `INVALID_MEDIA_TYPE`, and one bad row refuses the batch. `create_timeline_from_clips` validates every row before the timeline exists and adds the tracks the rows name.
+- **Arguments passed beside `action` were dropped (#372).** FastMCP ignores arguments the tool's signature does not name, so `timeline(action="get_name", timeline_name="vB")` ran on the current timeline with success and no `ignored_params`. Such calls are now refused before the tool runs, with `isError: true`, code `UNKNOWN_ARGUMENTS` and, for the compound tools, the corrected `params`. Applies to every tool in both servers.
+
+### Added
+
+- **`README.zh-TW.md`**, a Traditional Chinese (Taiwan) translation (#369). Its version badge and `本翻譯對應` line are part of every release bump, enforced by `test_release_surface_drift`.
+
+### Not changed
+
+- **#371** (probe cost per item up in 5.1.0): the probe makes the same 14 Resolve calls per item in v4.19.3, v5.1.0 and this release, and the server's own time is about 0.013 ms per item, so the measured change is Resolve's response time, not the server.
+
+### Not verified here
+
+- Offline tests only. The reports were measured on Studio 21.2.0.6; this machine runs Studio 19.1.3.7, and no live Resolve run was made for this release.
+
 ## What's New in v5.2.8 — Three calls stop answering success while dropping the request
 
 From #365, #366 and #368 by @willturner-maker.

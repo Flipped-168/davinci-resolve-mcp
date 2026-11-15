@@ -1043,6 +1043,10 @@ def create_timeline_from_clips(
             media_pool_item_id), start_frame, end_frame, record_frame.
             record_frame is relative to the created timeline start frame by
             default; pass record_frame_mode="absolute" for raw Resolve values.
+            Optional per row: track_index (1-based, default 1) and media_type
+            (1 video, 2 audio). The new timeline gets the tracks the rows name,
+            up to 32 of each type; a higher index is refused before anything
+            is created.
         If both are None, uses the currently selected media pool clips.
     """
     project, mp, err = _get_mp()
@@ -1056,6 +1060,11 @@ def create_timeline_from_clips(
             _, row_err = _build_create_clip_info_dict(root, ci, i)
             if row_err:
                 return row_err
+        # Rows that name a track past the new timeline's would land on track 1
+        # with success (issue #370): validate first, then add those tracks.
+        needed_tracks, track_err = clip_info_tracks.needed_tracks(clip_infos)
+        if track_err:
+            return {"error": track_err, "code": "INVALID_TRACK_INDEX"}
         tl = mp.CreateEmptyTimeline(name)
         if not tl:
             return {"success": False, "error": "Failed to create timeline"}
@@ -1068,12 +1077,19 @@ def create_timeline_from_clips(
                         "error": describe_switch_failure(switch_detail,
                                                          "appending the clip_infos"),
                         "switch": switch_detail}
+        ensure_err = clip_info_tracks.ensure_tracks(tl, needed_tracks)
+        if ensure_err:
+            return {"success": False,
+                    "error": f"Timeline {name!r} was created but the tracks the clip_infos "
+                             f"name could not be added: {ensure_err}",
+                    "code": "ADD_TRACK_FAILED"}
         timeline_start = _timeline_start_frame(tl)
         built = []
         for i, ci in enumerate(clip_infos):
             append_ci = dict(ci)
             append_ci.setdefault("track_index", append_ci.get("trackIndex", 1))
-            row, row_err = _build_append_clip_info_dict(root, append_ci, i, timeline_start)
+            row, row_err = _build_append_clip_info_dict(
+                root, append_ci, i, timeline_start, timeline=tl)
             if row_err:
                 return row_err
             built.append(row)
