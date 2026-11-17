@@ -2,6 +2,76 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.3.1 — prettier dev-dependency update
+
+From #375 (Dependabot).
+
+### Dependencies
+
+- **`prettier` 3.9.10 → 3.10.1** in `resolve-advanced` (dev dependency only). No runtime or tool behaviour changes.
+
+## What's New in v5.3.0 — Writes no longer follow the current timeline to another client's
+
+Fixes #382, reported by @willturner-maker.
+
+### Fixed
+
+- **A write could land on a different client's timeline.** A pin makes its timeline current once, at the start of a call. `MediaPool.AppendToTimeline` writes to whatever timeline is current *when it runs*, and `ripple_insert`, `move_clips`, `replace_source_range` and `edit_engine` swaps rebuild items with it. If a second client (another MCP server, a script, the user) switched timelines in between, the deletes went to the right timeline, the re-appends went to the other one, and the call reported success. Unpinned calls had the same window. Every append now checks first that the current timeline is still the one the call resolved. If it isn't, the append is refused with `TIMELINE_PIN_LOST` (pinned call) or `TIMELINE_CHANGED` (unpinned), and `state` names `expected_timeline` and `current_timeline`. Nothing reaches the other timeline.
+- **`ripple_insert` stops cleanly if the timeline moves mid-rebuild.** It checks before its delete, so a switch caught there changes nothing. A switch caught during the re-appends stops every further append, and `state` reports how many tail items were deleted and re-appended and how many inserts were placed. The archive taken before the edit is the way back. These refusals are `retryable: false`, because a blind retry could repeat steps that already ran.
+- **A pinned call refuses if its timeline is no longer current when the action reads it**, rather than acting on the new current timeline.
+
+### Added
+
+- **`media_pool(action="append_to_timeline")` takes a pin** (`timeline_id` / `timeline_name`). The rest of `media_pool` does not: `create_timeline*` reads `timeline_name` as the new timeline's name.
+- `docs/SKILL.md` lists which actions take a pin, describes the re-check, and adds the two error codes to the recovery table.
+
+### Limits
+
+- This catches a switch; it does not lock clients out of each other. The check and the append are two separate bridge calls, so a narrow window remains. For concurrent agents, pin every call and give each agent its own timeline.
+- An unreadable current timeline counts as "not measured", never as "different", so offline stubs and edge cases are not refused.
+
+### Not verified here
+
+- Offline tests only. The switch was simulated in tests (`tests/test_timeline_pin_concurrency.py`), not raced between two live clients.
+
+## What's New in v5.2.14 — `ripple_insert` blockers say what they are and what to do
+
+From #381 by @boomesh11, fixing #376 reported by @willturner-maker. Adapted on landing.
+
+### Fixed
+
+- **A `ripple_insert` blocker contradicted its own error.** A later item with no Media Pool clip came back with code `UNSPECIFIED` and `retryable: true`, while the top-level `RIPPLE_PLAN_BLOCKED` error said `retryable: false`. The blocker now carries `NO_MEDIA_POOL_ITEM`, `retryable: false`, and the `unsupported` category. That's the category `replace_source_range` already used for the same code; the one change made on landing was aligning it.
+- **Transitions were described as titles or generators.** The blocker message and `infeasible_reasons` now name transitions alongside titles, generators and Fusion comps.
+- **The remediation sent callers in a circle.** It told them to re-run with `dry_run=true`, even after they had just done that. It now says to resolve or remove the listed blockers, then re-run.
+
+### Not verified here
+
+- Offline tests only; no live Resolve run was made for this release.
+
+## What's New in v5.2.13 — Numeric project settings write as strings
+
+From #380 by @boomesh11, fixing #377 reported by @willturner-maker.
+
+### Fixed
+
+- **`safe_set_project_settings` reported `write: false` for numeric values, with no reason.** Resolve's `Project.SetSetting` only accepts strings, so an int such as `timelineResolutionWidth: 3840` was refused while `"3840"` wrote fine. Values that aren't strings are now converted to strings before the write and before the restore, the same way the other `SetSetting` wrappers already did.
+
+### Not verified here
+
+- Offline tests only; no live Resolve run was made for this release.
+
+## What's New in v5.2.12 — Lowercase CDL keys now reach Resolve
+
+From #379 by @boomesh11, fixing #378 reported by @willturner-maker.
+
+### Fixed
+
+- **`safe_set_cdl` dropped CDL values sent with lowercase keys.** A payload such as `{"slope": [...], "offset": [...], "power": [...], "saturation": 1.1, "node_index": 2}` kept the requested values under the lowercase keys, while the PascalCase keys Resolve reads (`NodeIndex`, `Slope`, `Offset`, `Power`, `Saturation`) were filled with identity defaults. Lowercase, snake_case and camelCase spellings now map to the PascalCase keys before validation and normalisation, so every path that sends a CDL to `SetCDL` gets the caller's values. When both spellings are given, the PascalCase key wins.
+
+### Not verified here
+
+- Offline tests only; no live Resolve run was made for this release.
+
 ## What's New in v5.2.11 — A typo'd track index no longer grows a new timeline
 
 From a follow-up on #370 by @willturner-maker.
