@@ -2,6 +2,57 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.3.4 — House-style conventions for word-by-word subtitles and motion graphics
+
+From #374 by @nisee22. Adapted on landing.
+
+### Added
+
+- **The house-style skill records its first two conventions.**
+  - **Word-by-word subtitles:** split the existing cards into one word each instead of transcribing again, and write an SRT for the editor to import. Each card's own time span is shared between its words by length, and each word stays on screen for at least 3 frames.
+  - **Motion graphics:** build a native Fusion comp that fills the whole 9:16 frame, instead of a pre-rendered PNG sequence laid over the speaker. Build the comp on its own 1080x1920 timeline, then place that timeline on the main one with `AppendToTimeline`, using `trackIndex` and `recordFrame`.
+
+The one change made on landing was copying the edit into `.agents/skills/house-style/SKILL.md`. The PR had only edited the `.claude` copy, and the two copies must match.
+
+### Not verified here
+
+- Documentation only; no tool behaviour changes.
+
+## What's New in v5.3.3 — DRP timeline start frame and timecode agree
+
+From #384.
+
+### Fixed
+
+When the DRP/DRT writer builds a timeline, it writes the start twice: as `<StartFrame>` and as the `<StartTC>` label. The two could disagree, or both be wrong.
+
+- **An explicit `startFrame` left `<StartTC>` stale.** `startFrame: 90000` at 24 fps was written next to `StartTC 01:00:00:00`, but 90000 is `01:02:30:00`. The label now matches the frame, in the caller's counting mode.
+- **Drop-frame was applied at every frame rate.** `01:00:00;00` at 24 fps counted to frame 86292. Drop-frame now applies only at 29.97 and 59.94 (SMPTE 12M).
+- **A label that didn't parse became frame 0**, and the bad label was still written out.
+- **Out-of-range fields were counted as if they were valid.** For example, `01:00:00:30` at 29.97 was counted as `01:00:01:00`.
+
+Valid start timecodes count exactly as before.
+
+### Changed
+
+- **An invalid start timecode now throws a `RangeError`** instead of writing a wrong start. This covers malformed labels, out-of-range fields, `;` at a rate with no drop-frame, and labels that drop-frame counting skips.
+
+### Not verified here
+
+- Offline tests only. Drop-frame labels were checked against a second, independent SMPTE 12M labeller over two hours at 29.97 and 59.94. No timeline was imported into Resolve for this release.
+
+## What's New in v5.3.2 — OFX choice and color parameters decode
+
+From #383.
+
+### Added
+
+- **`extractOFXTools` decodes OFX choice menus and RGB colors.** Before, both came back as `null`. A choice parameter now decodes to `{choice: index}`, and a color to `{rgb: [r, g, b], alpha?}`, from the bytes Resolve 19.1.3 writes in a node's OFX container. Index 0 is stored as an empty field, and a parameter left at its default isn't stored at all, so a missing parameter means "default". Only the raw index is returned; what it means depends on each plugin's own menu.
+
+### Not verified here
+
+- Decoding was measured on stills exported from Resolve Studio 19.1.3. No other Resolve version was checked.
+
 ## What's New in v5.3.1 — prettier dev-dependency update
 
 From #375 (Dependabot).
