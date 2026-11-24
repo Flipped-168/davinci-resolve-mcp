@@ -2,6 +2,55 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.4.3 — ripple_insert refuses an ambiguous or past-the-end record_frame
+
+Fixes #389, reported by @willturner-maker.
+
+### Fixed
+
+- **`timeline.ripple_insert` no longer reads a probe frame as an offset.** `record_frame` is relative to the timeline start by default, but every probe (`get_items`, `probe_timeline_structure`, `detect_gaps_overlaps`) reports absolute frames. On a timeline starting at 01:00:00:00, passing frame 108442 from a probe planned an insert at 216442, 107,779 frames past the end, and executed with `success: true`. Now a `record_frame` at or past the timeline start with no `record_frame_mode` is refused with `AMBIGUOUS_RECORD_FRAME`, and the remediation names both readings. Values below the start are still offsets, so existing calls that pass offsets behave as before.
+- **An insert point past the last item is refused**, in the dry run and on execute (`RIPPLE_PLAN_BLOCKED`), whatever the mode. An insert exactly at the end is still allowed.
+- **The plan now shows `timeline_start_frame`, `content_end_frame` and `record_frame_mode_used`** (`relative`, `absolute`, `auto` or `timecode`).
+- **`timeline.action_help(name="ripple_insert")` returns help** instead of `HELP_NOT_REGISTERED`.
+
+### Not changed
+
+- `record_timecode` is still read as absolute timeline timecode, the same as the viewer.
+- The append and `clip_infos` paths keep their default, which is also relative. The report said they were absolute; they aren't.
+
+### Validation
+
+- New offline tests cover the ambiguity refusal, absolute mode, the unchanged relative default, the past-the-end block (dry run and execute, with no append made) and an insert exactly at the end. Each guard was mutation-checked: disabling it turns its test red. Full Python suite and release static checks pass.
+- No live Resolve run. The fix only adds refusals and plan fields before anything changes; the execute path is unchanged.
+
+## What's New in v5.4.2 — fast-xml-parser 5.12.1
+
+From #386 (Dependabot).
+
+### Dependencies
+
+- **`fast-xml-parser` 5.12.0 → 5.12.1**, in the root lockfile and in `resolve-advanced`. A patch release upstream; no server behavior changed.
+
+### Validation
+
+- Node suite from a fresh `npm ci` in `resolve-advanced`: 1270 tests, 0 failed. Python suite and the release static checks pass. No Resolve behavior changed, so no live run.
+
+## What's New in v5.4.1 — Premiere Windows xmeml paths find their media
+
+From #388 by @goranai. Fixes #387.
+
+### Fixed
+
+- **Premiere on Windows writes media paths as `file://localhost/C%3a/...`.** The xmeml pre-check read that as `/C:/...`, which Windows can't find, so `import_timeline_checked` with `sanitize_media=true` removed every such clip even when the file was on disk, and `analyze_timeline_xml` listed them as missing. On Windows, a path that starts with `/X:` now drops the leading slash. macOS and Linux paths, UNC shares and every other form are unchanged.
+
+### Not changed
+
+- `_disk_to_pathurl`, the URL builder used when relinking, still writes Windows paths in the old form.
+
+### Validation
+
+- Python suite (4523 tests) and Node suite (1270 tests, fresh `npm ci`) on the PR merged with main. A mocked-Windows test runs on every platform. The Windows-only test that checks a real file on disk was run by the contributor on Windows 11. No Resolve behavior changed, so no live run.
+
 ## What's New in v5.4.0 — Optional transport provider for play state and captures during playback
 
 From #385.
