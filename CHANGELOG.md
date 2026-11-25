@@ -2,6 +2,45 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.5.1 — House-style conventions withdrawn
+
+From #391 by @nisee22.
+
+### Documentation
+
+- **The two house-style conventions from v5.3.4 are removed**, at the request of their author, who contributed them in #374. They covered word-by-word subtitles (split existing cards, don't transcribe again) and motion graphics (native Fusion, full 9:16 frame). The skill is back to its empty template, ready for each site to record its own conventions.
+- The PR changed only the `.claude/skills/` copy. On landing, the same change was made to the main copy in `.agents/skills/`, so the two copies match again.
+
+### Validation
+
+- Docs only; no server behavior changed, so no live run. The full Python suite, the release static checks and the skill-copy parity test pass.
+
+## What's New in v5.5.0 — Word Highlight: outline on every word, a box behind the spoken word, words per line
+
+From #392 by @devreddy1015. For #295.
+
+### Added
+
+`set_subtitle_preset` (live `timeline_ai` and offline `project_db`) could set Word Highlight's font, colours, spoken-word outline and drop shadow, but not the outline on every word that social captions use, nor most of the macro's own highlight controls.
+
+- **Outline on every word:** `allWordsOutlineEnabled`, `allWordsOutlineRed/Green/Blue` and `allWordsOutlineThickness`. These write Text+ shading element 4 and pin it to a text outline (`ElementShape4 = 1`), the same element and shape Resolve's bundled Lollipop template uses for its second outline. The per-word highlight overrides only elements 2, 3 and 5, so the spoken word keeps this outline, and `outlineEnabled`/`thickness` can still give it a thicker or coloured one.
+- **Spoken-word highlight controls** published by the macro: `highlightFillEnabled`, `highlightSoftness`, `highlightGlow`, `highlightBlend`, and a box behind the spoken word: `highlightBackgroundEnabled`, `highlightBackgroundRed/Green/Blue`, `highlightBackgroundOffsetX/OffsetY/Width/Height/Round/Softness/Glow/Blend`.
+- **Layout:** `wordsPerLine` (the macro's `Words`), `writeOn` and `showSpeaker`.
+
+The new keys are Word Highlight only. Other templates refuse them, as before.
+
+### Still refused
+
+- Per-word scale ("pop") and cue in/out transitions. Resolve's Lollipop preset stores its pop as `WordScaleX` keyframes in the macro's `CustomData`, not as an input. Whether Word Highlight's animator reads the same keyframes has not been measured, so nothing writes them.
+
+### Not verified here
+
+- Codec round-trips, the input schema and a full exported-DRT edit are covered by tests against the bundled Word Highlight reference. Nothing was run against a live Resolve: Resolve's re-export readback and the rendered look of element 4 and the background box are unmeasured.
+
+### Validation
+
+- Python suite (4529 tests) and Node suite (1275 tests, fresh `npm ci`) on the PR merged with main. The element 4 shape pin was mutation-checked: removing it turns 3 tests red. No live run: Word Highlight presets are not on this machine's Resolve 19.1.3.7, so the items above stay unmeasured.
+
 ## What's New in v5.4.3 — ripple_insert refuses an ambiguous or past-the-end record_frame
 
 Fixes #389, reported by @willturner-maker.
