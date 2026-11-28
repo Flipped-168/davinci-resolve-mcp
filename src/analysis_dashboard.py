@@ -14672,16 +14672,30 @@ def resolve_panel_token() -> str:
     return os.environ.get(PANEL_TOKEN_ENV) or secrets.token_urlsafe(32)
 
 
+def _valid_port(port: str) -> bool:
+    return bool(port) and port.isascii() and port.isdigit() and 1 <= int(port) <= 65535
+
+
 def _host_header_name(value: Optional[str]) -> str:
-    """Return the host part of a Host header (port stripped, lowercased)."""
+    """Return the host part of a valid Host header (port validated & stripped, lowercased)."""
     raw = (value or "").strip().lower()
-    if not raw:
+    if not raw or any(ch.isspace() for ch in raw) or "@" in raw or "/" in raw:
         return ""
     if raw.startswith("["):
         end = raw.find("]")
-        return raw[: end + 1] if end != -1 else raw
-    if raw.count(":") == 1:
-        return raw.split(":", 1)[0]
+        if end == -1:
+            return ""
+        rest = raw[end + 1 :]
+        if rest == "":
+            return raw[: end + 1]
+        if rest.startswith(":") and _valid_port(rest[1:]):
+            return raw[: end + 1]
+        return ""
+    if ":" in raw:
+        host, _, port = raw.partition(":")
+        if not host or ":" in port or not _valid_port(port):
+            return ""
+        return host
     return raw
 
 
@@ -14690,14 +14704,18 @@ def _host_is_loopback(value: Optional[str]) -> bool:
 
 
 def _origin_is_loopback(value: Optional[str]) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return False
     try:
-        parsed = urlparse((value or "").strip())
+        parsed = urlparse(raw)
     except ValueError:
         return False
     if parsed.scheme not in {"http", "https"}:
         return False
-    host = (parsed.hostname or "").lower()
-    return host in PANEL_LOOPBACK_HOSTS
+    if parsed.path or parsed.params or parsed.query or parsed.fragment:
+        return False
+    return _host_is_loopback(parsed.netloc)
 
 
 def _cookie_value(cookie_header: Optional[str], name: str) -> Optional[str]:
@@ -14708,14 +14726,21 @@ def _cookie_value(cookie_header: Optional[str], name: str) -> Optional[str]:
     return None
 
 
+def _same_secret(provided: str, expected: str) -> bool:
+    return secrets.compare_digest(
+        provided.encode("utf-8", "surrogatepass"),
+        expected.encode("utf-8"),
+    )
+
+
 def _request_presents_token(handler: BaseHTTPRequestHandler, token: str) -> bool:
     if not token:
         return False
     auth = handler.headers.get("Authorization") or ""
-    if auth.startswith("Bearer ") and secrets.compare_digest(auth[len("Bearer "):].strip(), token):
+    if auth.startswith("Bearer ") and _same_secret(auth[len("Bearer "):].strip(), token):
         return True
     cookie = _cookie_value(handler.headers.get("Cookie"), PANEL_COOKIE_NAME)
-    return bool(cookie) and secrets.compare_digest(cookie, token)
+    return bool(cookie) and _same_secret(cookie, token)
 
 
 def _launch_claude_code_terminal() -> Dict[str, Any]:
@@ -15577,14 +15602,15 @@ class Handler(BaseHTTPRequestHandler):
     def _gate(self) -> bool:
         """Run the request through the panel security gate; False = already answered."""
         path = urlparse(self.path).path
-        if not _host_is_loopback(self.headers.get("Host")):
+        hosts = self.headers.get_all("Host") or []
+        if len(hosts) != 1 or not _host_is_loopback(hosts[0]):
             self._json(
                 {"success": False, "error": "Rejected: Host header is not a loopback host (DNS-rebinding guard)."},
                 HTTPStatus.FORBIDDEN,
             )
             return False
-        origin = self.headers.get("Origin")
-        if origin is not None and not _origin_is_loopback(origin):
+        origins = self.headers.get_all("Origin") or []
+        if len(origins) > 1 or (origins and not _origin_is_loopback(origins[0])):
             self._json(
                 {"success": False, "error": "Rejected: cross-site origin (CSRF guard)."},
                 HTTPStatus.FORBIDDEN,

@@ -11,7 +11,7 @@ Usage:
     python src/server.py --full       # Start the 377-tool granular server instead
 """
 
-VERSION = "5.6.0"
+VERSION = "5.7.2"
 
 import base64
 import os
@@ -53,6 +53,7 @@ from src.utils.resolve211_dctl import native_dctl_result
 from src.utils.resolve211_normalization import normalize_audio
 from src.utils.subtitle_live import set_subtitle_preset as _set_live_subtitle_preset
 from src.utils.subtitle_live import list_captions_live as _list_live_captions
+from src.utils.subtitle_live import check_captions_live as _check_live_captions
 from src.utils.subtitle_live import write_captions_live as _write_live_captions
 from src.utils.title_library import list_title_presets as _list_installed_title_presets
 from src.utils.title_controls import title_text_targets as _title_text_targets
@@ -22790,11 +22791,21 @@ def _render_temp_path_ok(path: str) -> bool:
     if not path or not isinstance(path, str):
         return False
     try:
-        target = os.path.realpath(path)
-        temp_roots = {os.path.realpath(root) for root in (tempfile.gettempdir(), "/private/tmp", "/tmp")}
-        return any(os.path.commonpath([target, root]) == root for root in temp_roots)
+        target = os.path.normcase(os.path.realpath(path))
     except ValueError:
         return False
+    for root in (tempfile.gettempdir(), "/private/tmp", "/tmp"):
+        # Each root is tried on its own: on Windows "/tmp" resolves onto the
+        # current drive, and commonpath raises ValueError for paths on two
+        # drives. One such root must not hide a match on another (v5.6.0
+        # refused the temp dir itself whenever "/tmp" was compared first).
+        try:
+            resolved = os.path.normcase(os.path.realpath(root))
+            if os.path.commonpath([target, resolved]) == resolved:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _render_formats(proj):
@@ -29874,6 +29885,9 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
         existing preset_reference to avoid live capture. Never patches Project.db.
       list_captions_live(track?) -> {fps, captions:[{id,text,start,end,words}]}  — decoded
         from a native DRT export (timeline frames); read-only, Resolve stays open.
+      check_captions_live(track?, maxCharacters?=24, minFramesPerWord?=0) -> {ok, issues, fps}
+        Caption QC from a native DRT export: overlaps, word gaps/timing, line length,
+        and cards under minFramesPerWord frames per word (off at 0). Read-only.
       write_captions_live(track?, replace?, add?, delete?, template_caption_id?, revision_name?, dry_run?)
         Same caption shape as advanced project_db write_captions, but with Resolve open:
         replace:[{id,text,start,end,words:[{text,start,end}]}], add:[{text,start,end,words}],
@@ -29907,6 +29921,8 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
                                         {**p, "dry_run": _coerce_bool(p.get("dry_run", p.get("dryRun")))}, _resolve_safe_dir)
     elif action == "list_captions_live":
         return _list_live_captions(get_resolve(), tl, p, _resolve_safe_dir)
+    elif action == "check_captions_live":
+        return _check_live_captions(get_resolve(), tl, p, _resolve_safe_dir)
     elif action == "write_captions_live":
         return _write_live_captions(get_resolve(), proj, tl,
                                     {**p, "dry_run": _coerce_bool(p.get("dry_run", p.get("dryRun")))}, _resolve_safe_dir)
@@ -29934,7 +29950,7 @@ def timeline_ai(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     elif action == "grab_all_stills":
         stills = tl.GrabAllStills(p.get("source", 1))
         return {"count": len(stills) if stills else 0}
-    return _unknown(action, ["list_title_presets","create_subtitles","set_subtitle_preset","list_captions_live","write_captions_live","detect_scene_cuts","analyze_dolby_vision","grab_still","grab_all_stills"])
+    return _unknown(action, ["list_title_presets","create_subtitles","set_subtitle_preset","list_captions_live","check_captions_live","write_captions_live","detect_scene_cuts","analyze_dolby_vision","grab_still","grab_all_stills"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

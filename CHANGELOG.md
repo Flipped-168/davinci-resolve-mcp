@@ -2,6 +2,60 @@
 
 Release history for the DaVinci Resolve MCP Server. The latest release is summarized in the root README; older entries live here to keep the README focused.
 
+## What's New in v5.7.2 — Stricter Host and Origin checks in the control panel
+
+From #402 by @FFXFF1.
+
+### Fixed
+
+- **The control panel's Host check (DNS-rebinding guard) accepted malformed values** such as `[::1].evil.com`, `localhost:80@evil.com`, `localhost:notaport` and `127.0.0.1:99999`. It now refuses `@`, `/`, whitespace, anything after `]` other than a port, and any port that isn't 1–65535.
+- **The Origin check (CSRF guard) accepted origins with a username, a path, a query or a bad port**, such as `http://evil.com@localhost` or `http://localhost:8765/path`. An origin must now be a bare `http` or `https` origin whose host passes the Host check.
+- **Duplicate headers:** the gate read only the first `Host` and `Origin` header, so a loopback first header could hide a foreign second one. A request now needs exactly one `Host` header and at most one `Origin` header.
+- Severity: low, defence in depth. A browser can't send these values, and every request still needs the per-launch bearer token. The headers browsers really send (`localhost`, `127.0.0.1:port`, `[::1]:port`, and a bare `http://localhost:port` origin) still pass.
+
+### Validation
+
+- Full Python suite with the PR merged into main. Its 10 new checks fail on the previous code. GitHub CI passed on the PR. No Resolve behavior changed, so no live run.
+
+## What's New in v5.7.1 — Non-ASCII auth headers get a 401, not a crash
+
+From #401 by @FFXFF1.
+
+### Fixed
+
+- **A non-ASCII `Authorization` or `Cookie` header crashed the auth check.** Python's `compare_digest` raises an error on a string that contains non-ASCII characters, and HTTP servers decode header bytes as latin-1, so a header containing bytes 0x80–0xff got a 500 instead of a 401. Secrets are now compared as UTF-8 bytes in the control panel (bearer token and session cookie), the networked MCP transport, and the bridge's request signature check, which also returns False for a signature that is not a string.
+- Severity: low. The crash happened before any access was granted, so it never let a request through, and all three surfaces listen on loopback only. These four calls are every `compare_digest` call in the server.
+
+### Validation
+
+- Full Python suite with the PR merged into main. Its three new tests fail on the previous code. No Resolve behavior changed, so no live run.
+
+## What's New in v5.7.0 — Check captions with Resolve open
+
+From #398 by @devreddy1015. Asked for in #393.
+
+### Added
+
+- **`timeline_ai.check_captions_live`: caption QC with Resolve open.** It exports the timeline natively and runs the codec's `checkCaptions` on one subtitle track: overlaps, word gaps and timing, and line length (`maxCharacters`, default 24). It is read-only, like `list_captions_live`, which now shares its export path. Asked for in #393.
+- **Opt-in `minFramesPerWord` in `checkCaptions`.** A card shown for fewer than that many frames per word gets a `too_short` warning. It is off by default (0), so existing callers, including the offline `project_db` `check_captions`, are unchanged.
+
+### Validation
+
+- New Node tests cover `checkCaptionTimeline` on an exported DRT and the `too_short` rule; a Python test checks that the live check exports once, passes both options to the codec, and never imports or switches timelines. Not run against a live Resolve.
+- On landing: the full Python suite and the full Node suite (from a fresh `npm ci`) pass with the PR merged into main. Only the CHANGELOG conflicted. The check is read-only and was not run against a live Resolve; the codec path is tested on exported timelines.
+
+## What's New in v5.6.1 — Windows: temp paths accepted again; conform skips the PROXY folder
+
+### Fixed
+
+- **v5.6.0 refused temp-folder paths on Windows.** The temp-path check behind timeline, project, LUT and DRX exports, renders and `apply_trace_plan` compared every temp root inside one `try`. On Windows, `/tmp` resolves onto the current drive, and comparing paths on two drives raises an error. Whenever that root came first, the check refused everything, including the system temp folder itself. Each root is now checked on its own, in a fixed order, ignoring case. macOS and Linux were not affected. Windows CI caught it on the v5.6.0 commit.
+- **On Windows, `conform` indexed the PROXY folder** (from #400 by @goranai, fixes #399). The footage index skipped folders by matching markers such as `/PROXY/` against the file path, but Windows paths use backslashes, so the marker never matched. Paths and markers are now compared with forward slashes, so a marker written with either separator works. On macOS and Linux nothing changes, except that a marker containing a backslash now matches the folder.
+
+### Validation
+
+- Full Python suite and the full Node suite (from a fresh `npm ci`) pass, and the Windows CI job passes again. The new temp-path test simulates a root on another drive. The old code fails it for about half of all hash seeds, which is the same random set order that failed on Windows. #400's new test fails without its fix.
+- No Resolve behavior changed, so no live run.
+
 ## What's New in v5.6.0 — Security: confined report, log and output file paths; setup can no longer lower the guards
 
 Fixes two reported advisories: GHSA-3rvw-8897-xq63 (reported by @Vektori) and GHSA-c3m4-m58c-4pc7 (reported by @GeniusKangaroo). It also fixes the other places the same bug class turned up.
